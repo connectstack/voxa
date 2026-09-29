@@ -1,0 +1,59 @@
+# XcodeGen spec for the Voxa application shell. Regenerate the project with:  xcodegen generate
+#
+# All application logic lives in the local Swift package (Package.swift); this project only supplies what an app
+# bundle needs: Info.plist, entitlements, signing, hardened runtime and the icon. Xcode (unlike `swift build`) places
+# package resource bundles in Contents/Resources, which is where they are found at runtime.
+name: Voxa
+
+options:
+  bundleIdPrefix: com.rohitsainier
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    # Development builds are ad-hoc signed; scripts/build.sh --release re-signs with a Developer ID identity.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+
+packages:
+  Voxa:
+    path: .
+
+targets:
+  Voxa:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - Info.plist
+          - Voxa.entitlements
+    dependencies:
+      - package: Voxa
+        product: VoxaApp
+    settings:
+      base:
+        PRODUCT_NAME: Voxa
+        PRODUCT_BUNDLE_IDENTIFIER: com.rohitsainier.voxa
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/Voxa.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Debug:
+          # Lets the debugger attach to the hardened-runtime build.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: YES
+        Release:
+          # A notarizable build must not carry com.apple.security.get-task-allow.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          OTHER_CODE_SIGN_FLAGS: "--timestamp"

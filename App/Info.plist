@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Voxa</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Rohit Kumar. All rights reserved.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSSupportsAutomaticTermination</key>
+	<false/>
+	<key>NSSupportsSuddenTermination</key>
+	<false/>
+
+	<!-- Privacy usage descriptions. macOS shows these in the permission prompts, so they say plainly what Voxa does. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Voxa listens only while you hold the push-to-talk shortcut, and turns what you say into a command. Your voice is transcribed on this Mac.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Voxa uses Apple’s on-device speech recognition to turn your voice into text. Your audio stays on this Mac.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Voxa uses Automation to control other apps when you ask it to, for example opening a document or running a script.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Voxa reads and creates calendar events when you ask it to.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Voxa reads and creates calendar events when you ask it to.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Voxa creates reminders when you ask it to.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Voxa creates reminders when you ask it to.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Voxa connects to an Ollama server on your network only if you choose one in Settings.</string>
+
+	<!-- Ollama runs on this Mac or elsewhere on the local network, where plain http is normal. This relaxes App Transport
+	     Security for local addresses only; every other connection (the model APIs) still has to be https. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

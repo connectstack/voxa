@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Hardened-runtime entitlements for a Developer ID (non-sandboxed) build. Voxa is deliberately not sandboxed:
+	Accessibility control of other apps and Apple Events to arbitrary apps are impossible inside the App Sandbox.
+	Everything else stays default-deny under the hardened runtime: no JIT, no unsigned memory, no library-validation
+	exemption, no DYLD environment variables.
+	-->
+
+	<!-- Microphone capture (AVAudioEngine). -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<!-- Send Apple Events to other apps (Automation). The user still approves each target app in System Settings. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
+	<!-- EventKit access for Calendar and Reminders. -->
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+</dict>
+</plist>

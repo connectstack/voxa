@@ -1,0 +1,21 @@
+# Build output
+.build/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+
+# Editor settings (per developer)
+.vscode/
+
+# Local, per-developer signing/notarization settings
+scripts/config.local.sh
+
+# macOS
+.DS_Store
+
+# Release artifacts
+*.dmg
+*.zip
+*.xcarchive

@@ -1,0 +1,110 @@
+# SwiftLint configuration for Voxa. Run with:  swiftlint  (or `make lint`)
+
+included:
+  - Sources
+  - Tests
+  - App
+
+excluded:
+  - .build
+  - build
+  - Voxa.xcodeproj
+  - scripts
+
+opt_in_rules:
+  - closure_end_indentation
+  - collection_alignment
+  - contains_over_filter_count
+  - contains_over_first_not_nil
+  - discouraged_optional_boolean
+  - empty_collection_literal
+  - empty_count
+  - empty_string
+  - explicit_init
+  - first_where
+  - flatmap_over_map_reduce
+  - joined_default_parameter
+  - last_where
+  - literal_expression_end_indentation
+  - modifier_order
+  - multiline_arguments
+  - multiline_function_chains
+  - multiline_parameters
+  - operator_usage_whitespace
+  - overridden_super_call
+  - prefer_self_type_over_type_of_self
+  - redundant_nil_coalescing
+  - sorted_first_last
+  - sorted_imports
+  - toggle_bool
+  - unneeded_parentheses_in_closure_argument
+  - vertical_parameter_alignment_on_call
+  - vertical_whitespace_closing_braces
+  - yoda_condition
+
+disabled_rules:
+  - todo
+  - trailing_comma        # SwiftFormat owns trailing commas
+  - multiline_arguments_brackets
+
+line_length:
+  warning: 140
+  error: 200
+  ignores_urls: true
+  ignores_comments: true
+  ignores_interpolated_strings: true
+
+file_length:
+  warning: 600
+  error: 1000
+  ignore_comment_only_lines: true
+
+type_body_length:
+  warning: 350
+  error: 600
+
+function_body_length:
+  warning: 70
+  error: 150
+
+cyclomatic_complexity:
+  warning: 14
+  error: 30
+  ignores_case_statements: true
+
+large_tuple:
+  warning: 3
+  error: 5
+
+identifier_name:
+  min_length:
+    warning: 2
+  excluded:
+    - id
+    - x
+    - y
+    - to
+    - h
+
+type_name:
+  min_length: 3
+  max_length: 60
+
+nesting:
+  type_level: 3
+
+custom_rules:
+  no_constraint_driven_window_sizing:
+    name: "No constraint-driven window sizing"
+    regex: 'preferredContentSize|sizingOptions\s*=\s*\[\s*\.'
+    excluded_match_kinds:
+      - comment
+      - comment.mark
+      - doccomment
+      - doccomment.field
+    message: >-
+      Don't let SwiftUI size a window through Auto Layout (NSHostingController/NSHostingView sizingOptions such as
+      .preferredContentSize). On macOS 26 the window-frame change happens inside AppKit's layout pass, NSHostingView
+      then requests a constraints update, and AppKit throws (this crashed Settings). Use `sizingOptions = []` and size
+      the window explicitly, e.g. from a preference callback; see HUDView.init.
+    severity: error

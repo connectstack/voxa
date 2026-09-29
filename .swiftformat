@@ -1,0 +1,22 @@
+# SwiftFormat configuration for Voxa. Run with:  swiftformat .  (or `make format`)
+--swiftversion 6.0
+--exclude .build,build,Voxa.xcodeproj,scripts
+
+--indent 4
+--maxwidth 120
+--linebreaks lf
+--semicolons never
+--commas inline
+--trimwhitespace always
+--stripunusedargs closure-only
+--self remove
+--importgrouping alpha
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--wrapconditions after-first
+--closingparen balanced
+--ifdef no-indent
+--extensionacl on-declarations
+--header strip
+--disable wrapMultilineStatementBraces,redundantSelf
