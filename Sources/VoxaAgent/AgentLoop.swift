@@ -20,6 +20,7 @@ public struct AgentLoop: Sendable {
     let llm: any LLMClient
     let registry: ToolRegistry
     let confirmations: any ConfirmationProviding
+    let permissions: any ToolPermissionGranting
     let audit: any AuditLogging
     let systemPrompt: SystemPrompt
     let clock: any Clock<Duration>
@@ -35,6 +36,7 @@ public struct AgentLoop: Sendable {
         llm: any LLMClient,
         registry: ToolRegistry,
         confirmations: any ConfirmationProviding,
+        permissions: any ToolPermissionGranting = UnrestrictedToolPermissions(),
         audit: any AuditLogging = DiscardingAuditLog(),
         systemPrompt: SystemPrompt,
         clock: any Clock<Duration> = ContinuousClock(),
@@ -43,6 +45,7 @@ public struct AgentLoop: Sendable {
         self.llm = llm
         self.registry = registry
         self.confirmations = confirmations
+        self.permissions = permissions
         self.audit = audit
         self.systemPrompt = systemPrompt
         self.clock = clock
@@ -155,6 +158,9 @@ public struct AgentLoop: Sendable {
 
                 run.messages.append(LLMMessage(role: .assistant, content: response.contentForHistory))
                 let batch = try await runCalls(calls, malformed: response.malformedToolInputs, run: run)
+                // A tool needs a permission the user has refused: there is no point going on, and the error carries the
+                // button that fixes it, which a model's sentence can't. What already ran stays in the conversation's note.
+                if let missing = batch.missingPermission { throw missing }
                 run.messages.append(LLMMessage(role: .user, content: batch.results))
 
                 if batch.stopBecauseOfDeclines {

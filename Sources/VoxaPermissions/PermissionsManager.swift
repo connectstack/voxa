@@ -9,11 +9,12 @@ import VoxaCore
 
 /// Checks and requests the system permissions Voxa depends on.
 ///
-/// `@MainActor` because requesting access presents system UI and the results drive SwiftUI. Milestone status:
-/// microphone and speech recognition can be requested here; the other kinds report their live status and are
-/// wired up for requesting (with the onboarding flow) together with the tools that need them.
+/// `@MainActor` because requesting access presents system UI and the results drive SwiftUI. Every kind reports its live
+/// status without prompting. Requesting works for all but Automation, which macOS grants per target app the first time a
+/// script controls it. Accessibility and Screen Recording can't be granted from a dialog: the request shows the system's
+/// prompt (which points at System Settings) and returns at once, so callers watch the status afterwards.
 @MainActor
-public protocol PermissionsProviding: AnyObject {
+public protocol PermissionsProviding: AnyObject, Sendable {
     /// The current status, without prompting.
     func status(of kind: PermissionKind) -> PermissionStatus
     /// Prompts the user when the status is `.notDetermined`, then returns the resulting status.
@@ -96,8 +97,18 @@ public final class SystemPermissionsManager: PermissionsProviding {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
         case .speechRecognition:
             return await Self.requestSpeechAuthorization()
-        case .accessibility, .screenRecording, .calendars, .reminders, .automation:
-            Log.permissions.info("no in-app request flow for \(kind.rawValue, privacy: .public) yet")
+        case .accessibility:
+            // Shows the system dialog that offers to open System Settings; the switch itself is flipped there. (The key is
+            // written out because the framework's constant is shared mutable state under Swift 6.)
+            _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+        case .screenRecording:
+            _ = CGRequestScreenCaptureAccess()
+        case .calendars:
+            _ = await Self.requestEventKitAccess(for: .event)
+        case .reminders:
+            _ = await Self.requestEventKitAccess(for: .reminder)
+        case .automation:
+            Log.permissions.info("automation is granted per app; there is nothing to ask for ahead of time")
         }
         return status(of: kind)
     }
@@ -115,6 +126,21 @@ public final class SystemPermissionsManager: PermissionsProviding {
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: PermissionStatus(status))
             }
+        }
+    }
+
+    /// Asks for full access (reading is what the tools need). The store is made here, not kept, because EventKit's store isn't
+    /// `Sendable` and this may run while the main actor waits.
+    private nonisolated static func requestEventKitAccess(for entity: EKEntityType) async -> Bool {
+        let store = EKEventStore()
+        do {
+            switch entity {
+            case .reminder: return try await store.requestFullAccessToReminders()
+            default: return try await store.requestFullAccessToEvents()
+            }
+        } catch {
+            Log.permissions.error("EventKit access request failed: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 

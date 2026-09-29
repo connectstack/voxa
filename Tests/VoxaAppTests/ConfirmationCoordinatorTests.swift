@@ -11,6 +11,8 @@ struct ConfirmationCoordinatorTests {
     private let hud = FakeHUD()
     private let hotkeys = FakeHotkeyService()
     private let clock = ManualClock()
+    private let settings = FakeSettings()
+    private let speaker = FakeSpeaker()
     private let coordinator: ConfirmationCoordinator
 
     private let prompt = ConfirmationPrompt(
@@ -23,7 +25,9 @@ struct ConfirmationCoordinatorTests {
     )
 
     init() {
-        coordinator = ConfirmationCoordinator(hud: hud, hotkeys: hotkeys, clock: clock)
+        coordinator = ConfirmationCoordinator(
+            hud: hud, hotkeys: hotkeys, clock: clock, speaker: ReplySpeaker(synthesizer: speaker, settings: settings)
+        )
     }
 
     /// Starts a prompt and waits until it is on screen.
@@ -48,6 +52,26 @@ struct ConfirmationCoordinatorTests {
         #expect(!hud.keysEnabled)
         #expect(coordinator.isAwaitingAnswer)
         #expect(hotkeys.activeAllowListeners == 0, "the chord isn't captured while the guard runs")
+        task.cancel()
+        _ = await task.value
+    }
+
+    @Test("the question is spoken when the card appears, and the speech stops once it is answered")
+    func questionIsSpoken() async {
+        let task = await ask()
+        #expect(speaker.lastText == "Run an AppleScript? Hold the shortcut and say yes or no.")
+        #expect(speaker.isSpeaking)
+
+        coordinator.submitSpokenAnswer("no")
+        #expect(await task.value == .denied)
+        #expect(!speaker.isSpeaking, "an answered question isn't read out any longer")
+    }
+
+    @Test("with spoken replies off the card is silent")
+    func silentWhenOff() async {
+        settings.current.speakReplies = false
+        let task = await ask()
+        #expect(speaker.spoken.isEmpty)
         task.cancel()
         _ = await task.value
     }

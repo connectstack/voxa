@@ -1,6 +1,6 @@
 # Common tasks. `make help` lists them.
 
-.PHONY: help project build run test lint format snapshots icon clean
+.PHONY: help project build run run-signed test lint format snapshots icon clean
 
 help:            ## Show this help
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed -E 's/:.*##/\t/' | column -t -s "$$(printf '\t')"
@@ -11,8 +11,11 @@ project:         ## Regenerate Voxa.xcodeproj from project.yml (needs XcodeGen)
 build:           ## Debug build of Voxa.app (ad-hoc signed)
 	scripts/build.sh
 
-run:             ## Build, then launch Voxa.app
+run:             ## Build, then launch Voxa.app (ad-hoc signed: macOS forgets its permissions after every rebuild)
 	scripts/build.sh --run
+
+run-signed:      ## Build signed with your Developer ID, then launch: permissions (Accessibility, microphone...) survive rebuilds
+	scripts/build.sh --sign-dev --run
 
 test:            ## Run the unit tests
 	swift test

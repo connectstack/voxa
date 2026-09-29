@@ -8,7 +8,7 @@ struct ProviderKeySection: View {
     let provider: ModelProvider
     @State private var form: APIKeyFormModel
 
-    init(provider: ModelProvider, services: ProviderServices) {
+    init(provider: ModelProvider, services: SettingsServices) {
         self.provider = provider
         let keys = services.keys[provider] ?? InMemoryAPIKeyStore()
         _form = State(

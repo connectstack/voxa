@@ -30,9 +30,15 @@ let package = Package(
         // MARK: Capabilities (each depends only on VoxaCore)
         .target(name: "VoxaAudio", dependencies: ["VoxaCore"], swiftSettings: strict),
         .target(name: "VoxaSpeech", dependencies: ["VoxaCore"], swiftSettings: strict),
+        // Text to speech: speaking replies aloud with the system's voices.
+        .target(name: "VoxaVoice", dependencies: ["VoxaCore"], swiftSettings: strict),
         .target(name: "VoxaPermissions", dependencies: ["VoxaCore"], swiftSettings: strict),
         .target(name: "VoxaHUD", dependencies: ["VoxaCore"], swiftSettings: strict),
-        .target(name: "VoxaSettings", dependencies: ["VoxaCore", "VoxaSpeech", "VoxaLLM", keyboardShortcuts], swiftSettings: strict),
+        .target(
+            name: "VoxaSettings",
+            dependencies: ["VoxaCore", "VoxaSpeech", "VoxaLLM", "VoxaPermissions", "VoxaVoice", keyboardShortcuts],
+            swiftSettings: strict
+        ),
         // Model clients (Claude, OpenAI, Ollama) over URLSession with a shared streaming engine, and API key storage.
         .target(name: "VoxaLLM", dependencies: ["VoxaCore"], swiftSettings: strict),
         // Risk decisions, the untrusted-data envelope, and static analysis of URLs and scripts.
@@ -50,7 +56,7 @@ let package = Package(
         .target(
             name: "VoxaApp",
             dependencies: [
-                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaPermissions", "VoxaHUD", "VoxaSettings",
+                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaVoice", "VoxaPermissions", "VoxaHUD", "VoxaSettings",
                 "VoxaAgent", "VoxaLLM", "VoxaPolicy", "VoxaTools",
                 keyboardShortcuts,
             ],
@@ -61,16 +67,16 @@ let package = Package(
         .executableTarget(
             name: "VoxaDev",
             dependencies: [
-                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaHUD", "VoxaSettings", "VoxaAgent", "VoxaLLM", "VoxaPolicy",
-                "VoxaTools",
+                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaVoice", "VoxaPermissions", "VoxaHUD", "VoxaSettings", "VoxaAgent",
+                "VoxaLLM", "VoxaPolicy", "VoxaTools",
             ],
             swiftSettings: strict
         ),
         .target(
             name: "VoxaTestSupport",
             dependencies: [
-                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaPermissions", "VoxaHUD", "VoxaLLM", "VoxaPolicy", "VoxaAgent",
-                "VoxaTools",
+                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaVoice", "VoxaPermissions", "VoxaHUD", "VoxaLLM", "VoxaPolicy",
+                "VoxaAgent", "VoxaTools",
             ],
             swiftSettings: strict
         ),
@@ -79,6 +85,7 @@ let package = Package(
         .testTarget(name: "VoxaCoreTests", dependencies: ["VoxaCore", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaAudioTests", dependencies: ["VoxaAudio", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaSpeechTests", dependencies: ["VoxaSpeech", "VoxaTestSupport"], swiftSettings: strict),
+        .testTarget(name: "VoxaVoiceTests", dependencies: ["VoxaVoice", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaPermissionsTests", dependencies: ["VoxaPermissions", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaHUDTests", dependencies: ["VoxaHUD", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaSettingsTests", dependencies: ["VoxaSettings", "VoxaTestSupport"], swiftSettings: strict),

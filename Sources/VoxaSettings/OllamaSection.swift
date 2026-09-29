@@ -6,12 +6,12 @@ import VoxaLLM
 /// Ollama: the server, the models it has, and what the chosen one can do.
 struct OllamaSection: View {
     @Bindable var store: SettingsStore
-    let services: ProviderServices
+    let services: SettingsServices
 
     @State private var server: OllamaSettingsModel
     @State private var connection = APIKeyFormModel.Connection.idle
 
-    init(store: SettingsStore, services: ProviderServices) {
+    init(store: SettingsStore, services: SettingsServices) {
         self.store = store
         self.services = services
         _server = State(initialValue: OllamaSettingsModel(discovery: services.ollama))

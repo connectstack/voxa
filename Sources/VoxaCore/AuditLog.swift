@@ -8,7 +8,7 @@ import Foundation
 /// one), so it can't grow without bound.
 ///
 /// A failure to write is logged and swallowed: a broken log must not stop the agent, but it must not be silent either.
-public actor JSONLAuditLog: AuditLogging {
+public actor JSONLAuditLog: AuditLogging, AuditReading {
     public nonisolated let url: URL
     private let maxBytes: Int
     private let encoder: JSONEncoder
@@ -43,13 +43,28 @@ public actor JSONLAuditLog: AuditLogging {
         }
     }
 
-    /// Every entry, oldest first. Lines that can't be read are skipped, so one bad line never hides the rest.
+    /// Every entry, oldest first, including the ones that were moved aside when the file grew. Lines that can't be read are
+    /// skipped, so one bad line never hides the rest.
     public func entries() -> [AuditEntry] {
-        guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return data.split(separator: 0x0A).compactMap { try? decoder.decode(AuditEntry.self, from: Data($0)) }
+        return [rotatedURL, url].flatMap { file -> [AuditEntry] in
+            guard let data = try? Data(contentsOf: file) else { return [] }
+            return data.split(separator: 0x0A).compactMap { try? decoder.decode(AuditEntry.self, from: Data($0)) }
+        }
     }
+
+    public func readAll() -> [AuditEntry] { entries() }
+
+    /// How much room the trail takes on disk, both files together.
+    public func sizeOnDisk() -> Int {
+        [rotatedURL, url].reduce(0) { total, file in
+            let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+            return total + (size ?? 0)
+        }
+    }
+
+    public nonisolated var location: URL? { url }
 
     /// Deletes the log. The only way entries are ever removed, and only on the user's request.
     public func clear() throws {

@@ -16,6 +16,7 @@ final class SessionHarness {
     let permissions = FakePermissions()
     let settings = FakeSettings()
     let clock = ManualClock()
+    let speaker = FakeSpeaker()
     let controller: VoiceSessionController
 
     init(
@@ -43,6 +44,7 @@ final class SessionHarness {
             openModelSettings: openModelSettings,
             agent: agent,
             confirmations: confirmations,
+            speaker: ReplySpeaker(synthesizer: speaker, settings: settings),
             now: { Date(timeIntervalSince1970: 1_800_000_000) }
         )
         controller.start()

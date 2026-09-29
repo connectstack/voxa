@@ -5,10 +5,11 @@ an LLM with tool calling, then shows and speaks the result. It lives in the menu
 key, and transcribes your voice on the Mac. The model can be Claude, OpenAI's GPT, or a model that runs on your own Mac
 through Ollama.
 
-> **Status: milestone 2 of 5.** Hold the key, speak, and Voxa carries the command out with an LLM and four kinds of tool
-> (open an app, open a link, run a Shortcut, run an AppleScript), asking your permission for anything that isn't safe.
-> Calendar, reminders, clipboard, on-screen tools, spoken replies and the full settings arrive in later milestones. See
-> [Roadmap](#roadmap).
+> **Status: milestone 3 of 5.** Hold the key, speak, and Voxa carries the command out with an LLM and tools for apps and
+> links, Shortcuts and AppleScript, your calendar and reminders, the clipboard and the app in front, asking your permission
+> for anything that isn't safe, and answering aloud. A welcome guide sets up permissions and the model on first launch, and
+> Settings has a switch for every tool, a Permissions page and the history of what Voxa did. On-screen control (clicking and
+> typing in other apps), screenshots and the optional Whisper engine arrive in later milestones. See [Roadmap](#roadmap).
 
 ## Requirements
 
@@ -23,7 +24,9 @@ through Ollama.
 make run          # builds Voxa.app (Debug, ad-hoc signed) and launches it
 ```
 
-Look for the microphone icon in the menu bar. Then:
+Look for the microphone icon in the menu bar. On the first launch a **welcome guide** opens: it explains what Voxa does,
+asks for the microphone and speech-recognition permissions, and helps you choose a model. (It can be reopened from
+Settings → General.) Or do it by hand:
 
 1. **Choose a model**: menu bar icon → **Settings…** → **Model** → pick a provider (see [Models](#models)) → paste its key
    → **Save**. Keys go into the macOS Keychain and nowhere else. (**Test connection** makes a tiny request to check it.
@@ -31,11 +34,15 @@ Look for the microphone icon in the menu bar. Then:
 2. **Hold ⌥Space, speak, release.** The first time, macOS asks for Microphone and Speech Recognition access; the HUD
    explains anything that's missing and offers a button that opens the right System Settings pane.
 
-Try: *"open Notes"*, *"open apple.com"*, *"what's 6 times 7, use AppleScript"* (it will ask before running the script).
+Try: *"open Notes"*, *"open apple.com"*, *"what's on my calendar today?"*, *"remind me to call the bank tomorrow at ten"*,
+*"what's 6 times 7, use AppleScript"* (it will ask before running the script).
 
-> **Permissions and rebuilds.** An ad-hoc signature changes on every build, so macOS treats each build as a new app and
-> asks again. To keep your grants across rebuilds, sign development builds with your Developer ID:
-> `scripts/build.sh --sign-dev --run`.
+> **Permissions and rebuilds.** An ad-hoc signature changes on every build, so macOS treats each build as a new app: it asks
+> again, and an Accessibility entry left over from an earlier build can show as switched on in System Settings while doing
+> nothing. To keep your grants across rebuilds, sign development builds with your Developer ID: `make run-signed`
+> (`scripts/build.sh --sign-dev --run`). macOS asks once to let the build use your signing key: choose *Always Allow*.
+> If Accessibility says *Not asked yet* although Voxa is on in the list, select Voxa there, press **−** to remove it, and press
+> **Allow…** in Voxa again.
 
 ## Models
 
@@ -59,6 +66,23 @@ is identical for all three, so the safety rules don't depend on which one you us
   instructions and tool list. Raise it in Settings if you use long clipboard or file contents later on.
 - Try a key or a model without the app: `voxa-dev chat "say hello" --provider openai` (also `--provider ollama --model qwen3:8b`).
 
+## What Voxa can do
+
+Every tool has a switch in **Settings → Tools**; a tool that is off is hidden from the model and refused if called anyway.
+
+| Tool | What it does | How it is treated |
+|------|--------------|-------------------|
+| Open apps, open links | Opens an app or a web page | Runs, and tells you |
+| List and run Shortcuts | Runs one of your Shortcuts | **Always asks** |
+| Run AppleScript | Runs a script you read first | **Always asks**; shell routes are refused |
+| Read your calendar | Lists events for a day or a week | Runs; what it returns is untrusted data |
+| Add a calendar event | Adds one (never invites anyone) | Runs, and tells you |
+| Change or delete a calendar event | Moves, renames or removes one occurrence | **Always asks**; warns if others are invited |
+| Read your reminders, add a reminder | Lists what is due, adds one | Read runs; add tells you |
+| Read the clipboard | Reads the text you copied | Tells you; untrusted; **never** something a password manager marked secret |
+| Copy to the clipboard | Puts text there for you to paste | Tells you |
+| See what's in front | The front app, and with Accessibility its window title and your selection | Runs; title and selection are untrusted |
+
 ## Using it
 
 | You do | Voxa does |
@@ -66,7 +90,7 @@ is identical for all three, so the safety rules don't depend on which one you us
 | Hold ⌥Space | HUD appears near the top of the screen: *Listening…*, a level meter and the live transcript |
 | Release | Records a fraction of a second more (so the last word isn't clipped), then *Transcribing…*, then *Thinking…* while the model works and the name of each action while it runs |
 | A risky action comes up | A card shows exactly what will happen (the whole script, the address, the app) and why Voxa is asking. **Allow** / **Don't Allow**, **⌘↩** to allow, or hold ⌥Space and say *yes* or *no*. Esc stops the whole command. No answer in 60 seconds counts as *no* |
-| The reply | A short answer stays up for a few seconds. Hold ⌥Space within two minutes for a follow-up ("make it three hours") |
+| The reply | A short answer stays up for a few seconds and is **read aloud** (switch it off in Settings → General → Voice). Holding ⌥Space or pressing Esc stops the speech at once. Hold ⌥Space within two minutes for a follow-up ("make it three hours") |
 | Tap the key briefly | A hint: *Hold ⌥Space while you speak*. Push-to-talk needs a hold |
 | Press Esc | Cancels the command at any point (listening, thinking, or waiting on a question) and dismisses; while a reply is showing, Esc dismisses it |
 | Say nothing | *I didn't catch that* |
@@ -146,10 +170,17 @@ sequenceDiagram
 
 | Permission | Used for | When it is asked |
 |------------|----------|------------------|
-| Microphone | Hearing your command | First push-to-talk |
+| Microphone | Hearing your command | First push-to-talk, or from the welcome guide |
 | Speech Recognition | Apple's classic on-device recognizer (not needed by the newer engine) | First push-to-talk, only if that engine runs |
+| Calendars, Reminders | The calendar and reminders tools | The first time a command needs one, or ahead of time from Settings → Permissions |
+| Accessibility | The front window's title and your selected text (`get_frontmost_context`) | Only from the welcome guide or Settings → Permissions, never in the middle of a command |
 | Automation | `run_applescript` controlling another app | The first time a script talks to that app (macOS asks per app) |
-| Accessibility, Screen Recording, Calendars, Reminders | Later milestones' tools | When a command first needs them; onboarding arrives in M3 |
+| Screen Recording | Looking at the screen (milestone 4) | Not used yet |
+
+Voxa asks macOS at the moment a tool needs a permission, and the command's clock stops while the prompt is up. If you have said
+no, the command ends with a message and a button that opens the right System Settings pane, rather than the model
+being asked to write around it. **Settings → Permissions** shows all of them at once with a button on each, and a row turns green
+when you come back from System Settings.
 
 Speech recognition is always on-device. If a language has no on-device model, Voxa says so and tells you how to install
 one rather than sending audio to Apple's servers.
@@ -184,7 +215,12 @@ exhaustively tested. The rules, all in force in this milestone:
 - **Bounded.** At most 12 steps, 30 seconds per action, 2 minutes per command (not counting time spent deciding), and two
   refusals end the command. Esc stops everything, including a running script.
 - **Append-only audit log** of commands, tool calls, decisions and your answers: `~/Library/Application Support/Voxa/audit.jsonl`
-  (private to you, JSON Lines, capped at 5 MB). It holds no tool output and no key. A viewer and *Clear* arrive in M3.
+  (private to you, JSON Lines, capped at 5 MB). It holds no tool output and no key. **Settings → History** shows it grouped by
+  command, with a search, *Show in Finder* and *Clear History*: the only way anything is ever removed from it.
+- **Your calendar, reminders, clipboard and screen are outside content.** Whatever they return reaches the model as untrusted
+  data, and once it has, even reversible actions ask (an invitation from a stranger can carry an instruction). The clipboard tool
+  honors the convention password managers use and never returns something marked secret. A tool's permission is checked *before*
+  the tool describes what it will do, so nothing reads your calendar without access.
 - **Secrets.** Each API key lives in the Keychain only (one entry per provider, this device only, never synced). Logs never
   contain keys, transcripts or tool payloads at the default level. A key is only ever sent over `https` (or to this Mac, for
   a local test server): a server address in Settings that isn't, silently falls back to the provider's own, so a bad setting
@@ -197,7 +233,7 @@ exhaustively tested. The rules, all in force in this milestone:
 ## Development
 
 ```bash
-make test         # unit tests (620 of them, ~10 s: includes real-window tests and a real osascript)
+make test         # unit tests (808 of them, ~10 s: includes real-window tests, a real osascript and a real speech voice)
 make lint         # SwiftLint
 make format       # SwiftFormat
 make snapshots    # render the HUD in every state, light and dark, to build/snapshots
@@ -219,7 +255,7 @@ swift run voxa-dev chat "say hello" --provider openai   # one plain model call, 
 swift run voxa-dev ollama                               # what an Ollama server has, and what each model can do (read-only)
 ```
 
-`voxa-dev ask` needs a key (`--key`, or `$ANTHROPIC_API_KEY` / `$OPENAI_API_KEY`; Ollama needs none) or the mock server below.
+`voxa-dev ask` (with `--sample-data` for the calendar and clipboard tools) needs a key (`--key`, or `$ANTHROPIC_API_KEY` / `$OPENAI_API_KEY`; Ollama needs none) or the mock server below.
 `--confirm yes,no` answers the first prompt yes and the second no (default: ask at the terminal). `--dry-run` prints what
 `open_app` / `open_url` would open. Keys are used to build the client and never printed.
 
@@ -238,12 +274,19 @@ Ollama's context window and tool support) and answers by keyword (see its header
 confirmation), `inject` (a script whose output tries to redirect the model), `shell` (must be blocked), `unauthorized`,
 `quota`, `overloaded`, `cutoff`, `refuse`, `slow`. It pretends to have four Ollama models, one of which can't use tools.
 
-`scripts/e2e-providers.sh` runs the real Debug app through all three providers against it (with settings in a throwaway
-preferences domain, so yours are untouched) and checks the confirmation, the audit trail and every request:
+Two scripts run the real Debug app against it, with settings in a throwaway preferences domain (yours are untouched) and
+no system prompt ever appearing:
 
 ```bash
-scripts/build.sh && scripts/e2e-providers.sh
+scripts/build.sh
+scripts/e2e-providers.sh      # Claude, OpenAI and Ollama: a confirmation, the audit trail and every request
+scripts/e2e-tools.sh          # calendar, reminders, clipboard and context tools on sample data, an invitation with a hidden
+                              # instruction, the permission gate, spoken replies (one short sentence is said aloud), the walkthrough
 ```
+
+`e2e-tools.sh` uses two Debug-only variables: `VOXA_DEBUG_SAMPLE_DATA=1` (or `hostile`, which adds an event whose title tries to
+steer the model) makes the tools use made-up data, and `VOXA_DEBUG_TOOL_PERMISSIONS=calendars=denied,reminders=notDetermined`
+scripts the answers the permission gate gets.
 
 ### Debug builds
 
@@ -252,7 +295,8 @@ be driven from a shell (no microphone, no key press):
 
 ```bash
 notifyutil -p com.rohitsainier.voxa.debug.hud.listening      # also: partial long transcribing result notice error errorPlain hide
-notifyutil -p com.rohitsainier.voxa.debug.settings           # open Settings (…settings.close, …settings.tracking, …settings.tab.model)
+notifyutil -p com.rohitsainier.voxa.debug.settings           # open Settings (…settings.close, …settings.tracking, …settings.tab.model|tools|permissions|history…)
+notifyutil -p com.rohitsainier.voxa.debug.onboarding         # open the welcome guide (…onboarding.step.N, …onboarding.close)
 notifyutil -p com.rohitsainier.voxa.debug.key.down           # inject the push-to-talk key down / up (…key.up) into the real pipeline
 notifyutil -p com.rohitsainier.voxa.debug.hud.confirmScript  # also: thinking acting reply replyLong confirmURL confirmTaint confirmLong
 swift scripts/window-info.swift Voxa                          # window level, frame and visibility of the running app
@@ -352,6 +396,32 @@ a real API key:
 - [ ] Turn Wi-Fi off and ask for something: *You appear to be offline*, no hang. Turn it on again: the next command works.
 - [ ] Settings → Safety → *For every change*: even *"open Notes"* now asks first.
 - [ ] Look at `~/Library/Application Support/Voxa/audit.jsonl`: your commands, the tools, each decision and answer, no tool output.
+      (Settings → History shows the same thing.)
+
+**Milestone 3: needs your Mac and real permissions** (nothing below has been run against a real calendar, real reminders or a
+granted Accessibility permission: the automated checks use sample data and scripted permission answers)
+
+- [ ] First launch: the welcome guide opens. Its permission buttons bring up the real macOS prompts (Microphone, Speech
+      Recognition, and if you press them Calendars, Reminders, Accessibility) and the rows turn green as you answer.
+- [ ] *"What's on my calendar today?"* with Calendars not yet allowed: the macOS prompt appears, and after Allow the command
+      answers from your real calendar. After Don't Allow, the command ends with *Calendars access is off* and a button that opens
+      the Calendars pane; turning it on there and asking again works.
+- [ ] *"Add lunch with Sam tomorrow at one"* adds a real event on the right day and time (check Calendar), and the reply says
+      the day and time back. Try an all-day event (*"…on Friday, all day"*) and a two-day one: they must show as all-day in Calendar.
+- [ ] *"Move my dentist appointment to four"* and *"cancel it"* each show a card with the event and ask first; only that one
+      occurrence of a repeating event changes. An event with other attendees says so on the card.
+- [ ] *"Remind me to call the bank tomorrow at ten"* adds a reminder due at ten that actually notifies (check Reminders).
+- [ ] Copy some text, then *"what did I copy?"*: it reads it back and a notice says the clipboard was read. Copy a password from a
+      password manager: Voxa says it was marked secret and doesn't read it. *"Copy hello"* replaces the clipboard.
+- [ ] Turn Accessibility on (Settings → Permissions), select some text in another app, and ask *"what's selected?"*: it names
+      the app, the window title and your selection. With it off, only the app is named.
+- [ ] Replies are spoken. Change the voice and speed in Settings → General → Voice and press *Test voice*. Hold ⌥Space while it
+      talks: it stops at once. With the switch off, nothing is spoken.
+- [ ] Settings → Tools: turn *Open apps* off, ask *"open Notes"*: it is declined. Turn it back on.
+- [ ] Settings → General → *Start Voxa when I log in*: turn it on (macOS may ask you to approve it in Login Items), log out and in.
+      Turn it off again.
+- [ ] Settings → History: your commands appear with what happened; search finds one; *Show in Finder* reveals the file; *Clear
+      History…* asks, then empties it.
 
 **Model providers: needs your OpenAI key and/or Ollama with a tool-capable model**
 
@@ -371,8 +441,8 @@ a real API key:
 |-|-------|--------|
 | M1 | Menu-bar shell, hotkey, audio capture, Apple STT, HUD with live transcript | done |
 | M2 | LLM client + agent loop, `open_app` / `open_url` / `run_shortcut` / `run_applescript`, policy engine, confirmation HUD | done |
-| M3 | Permissions manager + onboarding, calendar / reminders / clipboard / context tools, TTS, full settings, audit viewer | next |
-| M4 | Accessibility UI tools, screenshot + vision fallback, WhisperKit engine | |
+| M3 | Permissions manager + welcome guide, calendar / reminders / clipboard / context tools, spoken replies, full settings, history viewer | done |
+| M4 | Accessibility UI tools, screenshot + vision fallback, WhisperKit engine | next |
 | M5 | Hardening, signing and notarization scripts, DMG, final docs | |
 
 ## License

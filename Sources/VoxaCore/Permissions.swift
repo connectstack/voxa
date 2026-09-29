@@ -14,6 +14,27 @@ public enum PermissionKind: String, CaseIterable, Sendable, Codable, Identifiabl
     case automation
 
     public var id: String { rawValue }
+
+    /// Whether the grant is per target app (Automation): macOS asks the first time a script controls each app, so it can't be
+    /// asked for ahead of time, and a tool that needs it must not be held up waiting for one general answer.
+    public var isPerApp: Bool { self == .automation }
+
+    /// Whether the switch is turned on in System Settings rather than answered in a prompt. The app can ask, which shows a
+    /// dialog and adds it to the list there, but the user has to go and flip it: so a button that opens that pane is always needed.
+    public var isGrantedInSystemSettings: Bool { self == .accessibility || self == .screenRecording }
+
+    /// The SF Symbol shown next to it in Settings and the walkthrough.
+    public var symbolName: String {
+        switch self {
+        case .microphone: "mic.fill"
+        case .speechRecognition: "waveform"
+        case .accessibility: "accessibility"
+        case .screenRecording: "rectangle.dashed.badge.record"
+        case .calendars: "calendar"
+        case .reminders: "checklist"
+        case .automation: "gearshape.2.fill"
+        }
+    }
 }
 
 public enum PermissionStatus: Sendable, Equatable {

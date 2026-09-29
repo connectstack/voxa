@@ -28,13 +28,16 @@ voxa/
 │  │                     JSONValue, Schema, AgentTool/ToolResult/RiskLevel, ConfirmationPrompt, AuditEntry, JSONLAuditLog
 │  ├─ VoxaAudio/         AudioCapturing, MicrophoneCapture (AVAudioEngine), SpeechFormatConverter, LevelMeter
 │  ├─ VoxaSpeech/        SpeechRecognizer; SFSpeechRecognizer + SpeechAnalyzer engines; [M4] WhisperKit
-│  ├─ VoxaPermissions/   PermissionsProviding, SystemPermissionsManager, System Settings deep links; [M3] all kinds
+│  ├─ VoxaPermissions/   PermissionsProviding, SystemPermissionsManager (asks for every kind), PermissionsModel (rows, polling)
+│  ├─ VoxaVoice/  [M3]   text to speech: SpeechSynthesizing, AVFoundationSpeaker, voice choice, text made ready to be said
 │  ├─ VoxaHUD/           non-activating NSPanel + SwiftUI HUD: listening, thinking, acting, confirmation card, reply
-│  ├─ VoxaSettings/      SettingsStore, tabs (General, Model with the provider picker, Safety), window controller, Ollama status
+│  ├─ VoxaSettings/      SettingsStore, six tabs (General incl. voice and login, Model, Tools, Permissions, Safety, History),
+│  │                     window controllers for Settings and the first-run walkthrough, Ollama status
 │  ├─ VoxaLLM/    [M2]   Model clients over URLSession, one per provider (Claude, OpenAI, Ollama) behind RoutingLLMClient;
 │  │                     shared streaming engine (SSE / NDJSON, retries, cancellation), request builders, key storage
 │  ├─ VoxaPolicy/ [M2]   PolicyEngine, untrusted-data envelope, AppleScript and URL analyzers, voice yes/no parser
-│  ├─ VoxaTools/  [M2]   open_app, open_url, list_shortcuts, run_shortcut, run_applescript; process runner   [M3-M4 add more]
+│  ├─ VoxaTools/  [M2-3] open_app, open_url, list_shortcuts, run_shortcut, run_applescript; calendar_* (4), reminders_* (2),
+│  │                     clipboard_* (2), get_frontmost_context; EventKit, pasteboard and Accessibility behind protocols
 │  ├─ VoxaAgent/  [M2]   AgentLoop, AgentService, ToolRegistry, ConversationMemory, system prompt + runtime context
 │  ├─ VoxaApp/           composition root, VoiceSessionController, ConfirmationCoordinator, hotkey service, menu bar
 │  ├─ VoxaDev/           developer CLI: transcribe, speech-status, hud-snapshots, system-prompt, ask, chat, ollama
@@ -100,6 +103,17 @@ protocol SpeechRecognizer: Sendable {
 
 // VoxaLLM. Raw URLSession: there is no official Swift SDK.
 protocol LLMClient: Sendable { func stream(_ request: LLMRequest) -> AsyncThrowingStream<LLMStreamEvent, any Error> }
+
+// VoxaPermissions / VoxaAgent (M3)
+protocol PermissionsProviding: AnyObject, Sendable { status(of:), request(_:), openSystemSettings(for:) }   // @MainActor
+protocol ToolPermissionGranting: Sendable { func ensureGranted(_ kinds: [PermissionKind]) async -> UserFacingError? }
+// VoxaTools (M3): each system touchpoint is a protocol, with the real thing and an in-memory double
+protocol CalendarAccessing, RemindersAccessing, ClipboardAccessing, FrontmostContextProviding: Sendable
+struct SystemAccess { calendar, reminders, clipboard, frontmost; static func real(); static func sample() }
+// VoxaVoice (M3)
+protocol SpeechSynthesizing: AnyObject { speak(_:options:), stop(), voices() }   // @MainActor
+// VoxaCore (M3): the trail can be read back, separately from being written
+protocol AuditReading: Sendable { readAll(), clear(), location, sizeOnDisk() }
 
 // VoxaPolicy / VoxaAgent
 struct PolicyEngine: Sendable {   // pure: same call, same state, same answer
@@ -234,6 +248,62 @@ each client = StreamingEngine (retries, backoff, cancellation, .restarted) + a w
 - The address may be `http` on any host (the user's own home server, say): no key is sent, but the conversation is, so the
   choice is theirs. Cloud models (`remote_host` in `/api/tags`) are flagged, since they leave the Mac.
 
+### Permissions (M3)
+
+- **The gate sits in the agent loop, before the tool describes its call.** A tool declares `requiredPermissions`; the loop asks
+  a `ToolPermissionGranting` (the real permissions manager in the app) before `assess`, because what a tool reads to describe a
+  call (the event about to be deleted) needs the permission too. A permission not yet asked about is requested (the command's
+  clock is paused while the prompt is up). One that was refused **ends the command** with the standard permission error, whose
+  button opens the right System Settings pane. A model's sentence can't carry a button, and there is nothing else useful for it
+  to do. Esc during the prompt cancels the command: the tool must not start (a test caught that it once did).
+- **Automation is not gated.** It is granted per target app when a script first controls it, so it can't be asked for ahead of
+  time; `PermissionKind.isPerApp` keeps it out of the gate, and the tool explains a -1743 error instead.
+- **Accessibility is never requested in the middle of a command.** Granting it means leaving for System Settings, so the
+  tool that can use it (`get_frontmost_context`) works without it and says what it is missing; the walkthrough and the
+  Permissions tab are where it is asked for.
+- The Permissions tab polls once a second while it is on screen and on becoming active: macOS sends no notification when a
+  switch is flipped in System Settings.
+
+### Calendar, reminders, clipboard and context tools (M3)
+
+- **Everything they read is untrusted.** Event titles and notes come from whoever sent an invitation; reminder titles from a shared
+  list; the clipboard from wherever it was copied; window titles and selections from other apps. Each result is marked
+  `untrusted`, which taints the conversation: afterwards even reversible actions ask. There is an end-to-end test with an
+  invitation whose title tells the model to open a hostile link: the link is put to the user, not opened.
+- **Results echo only what Voxa or the model wrote.** `calendar_update_event` reports what it was asked to change, never the event's
+  stored title, so a hostile title can't come back through a "trusted" channel.
+- **Risk.** Read-only: list events, list reminders, front app. Reversible (a notice, or a question under strict settings or after
+  taint): add an event, add a reminder, read and write the clipboard. Sensitive (always asks): change or delete an event. The
+  policy has a floor for each by name, so a wrong self-classification can't lower the bar. `clipboard_read` is reversible rather
+  than read-only because it sends what you copied to a model provider, and that deserves a visible notice.
+- **Dates** travel as ISO 8601 with a UTC offset in both directions, so there is no guessing about time zones; a time with no
+  offset is the user's clock and a bare date means the whole day (an all-day event).
+- **Events are named by `id` and `start`.** Every occurrence of a repeating event shares its identifier, so a change or delete gives
+  both (copied from `calendar_list_events`), and only that occurrence is touched. An all-day event's end is expressed as the start of
+  the day after (EventKit stores it as 23:59:59 of the last day; the conversion is at the EventKit boundary only).
+- **The clipboard honors `org.nspasteboard.ConcealedType`**: what a password manager marked secret is never returned.
+- **EventKit is behind protocols**, with in-memory doubles that ship in `VoxaTools` (not just in tests) so Debug builds can run the
+  whole pipeline against sample data. The real implementations are tested only for what can be tested without access (they return
+  nothing and error clearly); they have not been run against a real calendar, which needs the user's grant.
+
+### Speaking (M3)
+
+- `AVSpeechSynthesizer`: on this Mac, free, no network. What is spoken: the reply, an error's title, and a confirmation's
+  question (so it can be answered without looking). All of it is also on screen.
+- **Voxa must never hear itself.** Any press of the shortcut, and Esc, stop the speech before anything else happens. Tests cover both
+  at the session level; the real synthesizer is tested by rendering audio to memory (proving a voice exists and makes sound, that
+  rate changes length) without playing anything.
+- Text is prepared first (`SpokenText`): links become "a link", markdown symbols and lists are removed, long replies are cut at a
+  sentence end. The voice is the best installed one for the recognition language unless one is chosen.
+
+### The audit viewer and first-run walkthrough (M3)
+
+- The history reads the same JSONL file, the current one and the one moved aside at 5 MB, grouped into commands (`AuditGrouping`).
+  Reading is a separate protocol from writing, so nothing in the agent can read the trail. Clearing asks, and is the only way
+  anything is removed.
+- The walkthrough (welcome, permissions, model, ready) opens once on a first run and never traps the user: every step can be skipped,
+  and the last says plainly what is still missing. Its window is fixed-size, like Settings, for the same reason.
+
 ## 4. Agent system prompt
 
 `Sources/VoxaAgent/Resources/AgentSystemPrompt.md` (print it with `swift run voxa-dev system-prompt`). It is loaded at
@@ -255,6 +325,10 @@ runtime, filled in with the step cap, and kept **static**. Tests pin the safety 
 | A9 | For a provider that takes a key (Claude, OpenAI) the base URL must be `https`, or `http` to loopback. Anything else silently becomes that provider's own endpoint. Ollama takes no key, so its address may be `http` anywhere. | A bad setting must never send a key to an arbitrary host. |
 | A10 | Taint lasts for the conversation, not one command. | The model still holds the untrusted text; see "Policy rules". |
 | A11 | `swift format` (the Xcode toolchain's) is used for wrapping; SwiftFormat isn't installed here. | One argument per line when wrapped, as the SwiftLint rule wants. |
+| A12 | Replies are spoken by default, and the walkthrough's last page has the switch. | A voice assistant that only writes is surprising; but speech is never the only channel, and a press or Esc silences it. |
+| A13 | A refused permission ends the command instead of returning an error to the model. | The error carries a button that fixes it; a sentence can't. The cost is that other steps of the same command don't run. |
+| A14 | `clipboard_read` is reversible (a notice), not read-only. | It sends what you copied to a model provider, which deserves to be visible. |
+| A15 | The walkthrough opens once, on a first run, and can be reopened from Settings. Existing users see it once after updating. | It is also the place that checks everything needed is in place. |
 
 ### Lesson: never let SwiftUI size a window through Auto Layout on macOS 26
 
@@ -294,6 +368,12 @@ request the way the real service would (headers, tool-result adjacency, sorted t
 and provokes 401, 529, a dropped stream and a refusal. It showed that a stalled connection waited a full minute before retrying (now 30 s) and confirmed that a truly
 dropped one retries in about two seconds.
 
+### Lesson: anything that waits on the person can outlive their Esc
+
+The permission prompt made the loop wait for the user, and a test that pressed Esc during the wait found that the tool started
+anyway once the prompt was answered: nothing checked for cancellation between "vetted" and "run". The loop now checks right after
+vetting, and after a confirmation. Any new place the loop waits on the user needs the same check, and a test that cancels there.
+
 ### Lesson: fakes hid that "open Safari" couldn't work
 
 Every `open_app` test passed against a fake app list. Run once against the real one, Safari wasn't found: on macOS 26 its
@@ -315,6 +395,7 @@ real catalog. Any tool that reads the real system should have at least one test 
 | R7 | Speech and audio behavior that can only be verified with real hardware and permissions. | Manual QA checklist in the README; `voxa-dev` exercises engines without a person. |
 | R8 | The real APIs' behavior (streaming edge cases, model-specific parameters) can't be exercised without a key. | Request shapes are pinned against the documented rules in tests and a validating mock server; the first real run is on the manual QA list. **OpenAI in particular has not yet been run against the live API**; Ollama has, with a model that can't use tools (which exercises discovery, streaming and its errors), but not yet with a tool-capable one. |
 | R9 | AppleScript is a general-purpose language; no static check proves a script safe. | Always sensitive; the user reads the whole script; a reader that matches AppleScript's own parsing refuses the known routes to a shell; out of process with a timeout. |
+| R10 | EventKit (calendar, reminders) and Accessibility behavior can't be exercised without the user's grants, and an ad-hoc build loses them on every rebuild. | The tools are tested against in-memory doubles and the real classes for the no-access path; the app runs end to end on sample data with scripted permission answers; the first real run is on the manual QA list. |
 
 ## 7. Milestones
 
@@ -322,6 +403,6 @@ real catalog. Any tool that reads the real system should have at least one test 
 |-|-------|--------|
 | M1 | Menu-bar shell, hotkey, audio capture, Apple STT, HUD with live transcript | done |
 | M2 | LLMClient, agent loop, open_app / open_url / run_shortcut / run_applescript, policy engine, confirmation HUD | done |
-| M3 | PermissionsManager + onboarding, calendar / reminders / clipboard / context tools, TTS, full settings, audit log | |
-| M4 | Accessibility UI tools, screenshot + vision fallback, WhisperKit engine | |
+| M3 | PermissionsManager + onboarding, calendar / reminders / clipboard / context tools, TTS, full settings, audit viewer | done |
+| M4 | Accessibility UI tools, screenshot + vision fallback, WhisperKit engine | next |
 | M5 | Hardening, tests, signing and notarization scripts, README, DMG | |

@@ -5,7 +5,7 @@ import VoxaLLM
 /// The "Model" tab: which provider answers, and that provider's key or server, model and thinking.
 struct ModelSettingsView: View {
     @Bindable var store: SettingsStore
-    let services: ProviderServices
+    let services: SettingsServices
 
     var body: some View {
         Form {

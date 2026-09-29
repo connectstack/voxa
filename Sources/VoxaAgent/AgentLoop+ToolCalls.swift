@@ -11,6 +11,8 @@ extension AgentLoop {
     struct Batch {
         var results: [ContentBlock]
         var stopBecauseOfDeclines: Bool
+        /// Set when a call needs a system permission the user has refused; the run ends with this error.
+        var missingPermission: UserFacingError?
     }
 
     typealias Call = (id: String, name: String, input: JSONValue)
@@ -28,6 +30,9 @@ extension AgentLoop {
             }
             let handled = try await handle(call, malformed: malformed[call.id], run: run)
             results.append(handled.block)
+            if let missing = handled.missingPermission {
+                return Batch(results: results, stopBecauseOfDeclines: false, missingPermission: missing)
+            }
             if handled.declined { skipRest = true }
         }
         return Batch(results: results, stopBecauseOfDeclines: run.declines >= limits.maxDeclines)
@@ -36,6 +41,7 @@ extension AgentLoop {
     struct Handled {
         var block: ContentBlock
         var declined = false
+        var missingPermission: UserFacingError?
     }
 
     func handle(_ call: Call, malformed: String?, run: Run) async throws -> Handled {
@@ -45,6 +51,8 @@ extension AgentLoop {
         case .rejected(let handled):
             return handled
         case .accepted(let tool, let assessment):
+            // Vetting can wait on the user (a system permission prompt); Esc pressed meanwhile must not start the tool.
+            try Task.checkCancellation()
             return try await review(tool, assessment, call: call, run: run)
         }
     }
@@ -96,6 +104,27 @@ extension AgentLoop {
         case rejected(Handled)
     }
 
+    /// Makes sure the system permissions this tool needs are granted, asking macOS for the ones the user hasn't been asked
+    /// about. The command's clock stops meanwhile: the prompt takes as long as the person needs. Automation is left out,
+    /// since macOS asks for it per app when a script first controls one.
+    ///
+    /// - Returns: nil when the tool may go ahead, or the error to end the command with.
+    func ensurePermissions(for tool: any AgentTool, call: Call, run: Run) async -> UserFacingError? {
+        // A tool the user has switched off is refused by the policy; it shouldn't bring up a system prompt on the way.
+        guard !run.configuration.disabledTools.contains(call.name) else { return nil }
+        let needed = tool.requiredPermissions.filter { !$0.isPerApp }.sorted { $0.rawValue < $1.rawValue }
+        guard !needed.isEmpty else { return nil }
+
+        await run.deadline.pause()
+        let shortfall = await permissions.ensureGranted(needed)
+        await run.deadline.resume()
+
+        if shortfall != nil {
+            await record(run, .permission, tool: call.name, outcome: "denied", detail: needed.map(\.rawValue).joined(separator: ","))
+        }
+        return shortfall
+    }
+
     /// Everything that can be checked before policy: the arguments parsed, the tool exists, they match its schema, and the
     /// tool understands them. Anything wrong is reported to the model without asking anyone.
     func vet(_ call: Call, malformed: String?, run: Run) async -> Vetting {
@@ -121,6 +150,15 @@ extension AgentLoop {
         let problems = InputValidator.validate(call.input, against: tool.inputSchema)
         if !problems.isEmpty {
             return await reject("Nothing was run. " + problems.joined(separator: " "), outcome: "invalid")
+        }
+        // Before the tool describes the call: what it reads to do that (an event to delete, say) needs the permission too.
+        if let missing = await ensurePermissions(for: tool, call: call, run: run) {
+            return .rejected(
+                Handled(
+                    block: errorBlock(call.id, "Not run: \(missing.title)."),
+                    missingPermission: missing
+                )
+            )
         }
         do {
             return .accepted(tool: tool, assessment: try tool.assess(call.input))

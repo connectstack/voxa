@@ -182,6 +182,66 @@ struct AgentSessionTests {
         #expect(await waitUntil { harness.hotkeys.activeCancelListeners == 0 }, "after the reply times out, Esc goes back to other apps")
     }
 
+    // MARK: Speaking
+
+    @Test("the reply is spoken as well as shown")
+    func replyIsSpoken() async {
+        let (harness, _) = harness(.init(result: AgentRunResult(outcome: .completed, reply: "Opened Safari.")))
+        await reachAgent(harness)
+        #expect(await waitUntil { harness.hud.lastMode == .reply("Opened Safari.") })
+        #expect(harness.speaker.spoken.map(\.text) == ["Opened Safari."])
+    }
+
+    @Test("a failure is spoken as its title, and shown")
+    func errorIsSpoken() async {
+        let error = UserFacingError(title: "Ollama isn't running", detail: "Open the Ollama app, then try again.")
+        let (harness, _) = harness(.init(result: AgentRunResult(outcome: .failed(error), reply: error.title)))
+        await reachAgent(harness)
+        #expect(await waitUntil { harness.hud.lastMode == .error(error) })
+        #expect(harness.speaker.spoken.map(\.text) == ["Ollama isn't running"])
+    }
+
+    @Test("a cancelled command says nothing")
+    func cancelledIsSilent() async {
+        var script = FakeAgent.Script(events: [.thinking(step: 1)])
+        script.holds = true
+        let (harness, _) = harness(script)
+        await reachAgent(harness)
+        harness.hotkeys.pressEscape()
+        #expect(await waitUntil { harness.controller.status == .idle })
+        #expect(harness.speaker.spoken.isEmpty)
+    }
+
+    @Test("with spoken replies off the reply is only shown")
+    func silentWhenOff() async {
+        let (harness, _) = harness()
+        harness.settings.current.speakReplies = false
+        await reachAgent(harness)
+        #expect(await waitUntil { harness.hud.lastMode == .reply("Opened Safari.") })
+        #expect(harness.speaker.spoken.isEmpty)
+    }
+
+    @Test("pressing the shortcut cuts the speech off before the microphone opens, so Voxa never hears itself")
+    func pressStopsSpeech() async {
+        let (harness, _) = harness()
+        await reachAgent(harness)
+        #expect(await waitUntil { harness.speaker.isSpeaking })
+        let stopsBefore = harness.speaker.stopCount
+
+        harness.hotkeys.press()
+        #expect(await waitUntil { harness.speaker.stopCount > stopsBefore })
+        #expect(!harness.speaker.isSpeaking)
+    }
+
+    @Test("Esc stops the speech too")
+    func escapeStopsSpeech() async {
+        let (harness, _) = harness()
+        await reachAgent(harness)
+        #expect(await waitUntil { harness.speaker.isSpeaking })
+        harness.hotkeys.pressEscape()
+        #expect(await waitUntil { !harness.speaker.isSpeaking })
+    }
+
     // MARK: Cancelling
 
     @Test("Esc during the agent cancels it, hides the HUD, and shows no reply")

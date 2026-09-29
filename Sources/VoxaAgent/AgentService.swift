@@ -9,6 +9,7 @@ public actor AgentService {
     private let llm: any LLMClient
     private let registry: ToolRegistry
     private let confirmations: any ConfirmationProviding
+    private let permissions: any ToolPermissionGranting
     private let audit: any AuditLogging
     private let systemPrompt: SystemPrompt
     private let clock: any Clock<Duration>
@@ -23,6 +24,7 @@ public actor AgentService {
         llm: any LLMClient,
         registry: ToolRegistry,
         confirmations: any ConfirmationProviding,
+        permissions: any ToolPermissionGranting = UnrestrictedToolPermissions(),
         audit: any AuditLogging = DiscardingAuditLog(),
         systemPrompt: SystemPrompt,
         clock: any Clock<Duration> = ContinuousClock(),
@@ -32,6 +34,7 @@ public actor AgentService {
         self.llm = llm
         self.registry = registry
         self.confirmations = confirmations
+        self.permissions = permissions
         self.audit = audit
         self.systemPrompt = systemPrompt
         self.clock = clock
@@ -77,6 +80,7 @@ public actor AgentService {
             llm: llm,
             registry: registry,
             confirmations: confirmations,
+            permissions: permissions,
             audit: audit,
             systemPrompt: systemPrompt,
             clock: clock,

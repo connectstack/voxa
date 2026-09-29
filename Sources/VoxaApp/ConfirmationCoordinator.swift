@@ -39,12 +39,19 @@ public final class ConfirmationCoordinator: ConfirmationProviding, ConfirmationR
     @ObservationIgnored private let hud: any HUDPresenting
     @ObservationIgnored private let hotkeys: any HotkeyService
     @ObservationIgnored private let clock: any Clock<Duration>
+    @ObservationIgnored private let speaker: ReplySpeaker?
     @ObservationIgnored private var pending: Pending?
 
-    public init(hud: any HUDPresenting, hotkeys: any HotkeyService, clock: any Clock<Duration> = ContinuousClock()) {
+    public init(
+        hud: any HUDPresenting,
+        hotkeys: any HotkeyService,
+        clock: any Clock<Duration> = ContinuousClock(),
+        speaker: ReplySpeaker? = nil
+    ) {
         self.hud = hud
         self.hotkeys = hotkeys
         self.clock = clock
+        self.speaker = speaker
     }
 
     // MARK: ConfirmationProviding
@@ -91,6 +98,7 @@ public final class ConfirmationCoordinator: ConfirmationProviding, ConfirmationR
         hud.setConfirmationKeysEnabled(false)
         hud.setAnswerStatus(.idle)
         hud.show(.confirm(pending.prompt))
+        speaker?.speakQuestion(pending.prompt)
 
         pending.guardTask = Task { [weak self, clock] in
             try? await clock.sleep(for: Self.inputGuard)
@@ -138,6 +146,7 @@ public final class ConfirmationCoordinator: ConfirmationProviding, ConfirmationR
         self.pending = nil
         isAwaitingAnswer = false
         pending.cancelTasks()
+        speaker?.stop()
 
         hud.onConfirmationChoice = nil
         hud.setConfirmationKeysEnabled(false)

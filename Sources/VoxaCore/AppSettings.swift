@@ -33,6 +33,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public static let defaultOllamaBaseURL = "http://localhost:11434"
     /// Ollama's default context window is small enough to silently cut off Voxa's prompt and tools, so requests set it.
     public static let defaultOllamaContextLength = 16_384
+    /// `AVSpeechUtterance`'s own default pace, and the range Settings offers around it: slower than this is hard to bear and
+    /// faster starts to blur.
+    public static let defaultSpeechRate = 0.5
+    public static let speechRateRange: ClosedRange<Double> = 0.3...0.7
 
     /// The user's language and region as a plain `language_REGION` identifier (e.g. `en_IN`), without the calendar
     /// and region-override extensions that `Locale.current.identifier` can carry and speech engines reject.
@@ -77,11 +81,25 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// How long after a command a follow-up ("also make it three hours") still refers to it.
     public var followUpWindowSeconds: Int
 
+    // MARK: Voice
+
+    /// Read replies (and the question of a confirmation) aloud.
+    public var speakReplies: Bool
+    /// The system voice to use, or empty for the best one installed for the recognition language.
+    public var voiceIdentifier: String
+    /// How fast replies are spoken, in `AVSpeechUtterance`'s units (`speechRateRange`).
+    public var speechRate: Double
+
     // MARK: Safety
 
     public var confirmationStrictness: ConfirmationStrictness
     /// Names of tools the user has switched off. They are hidden from the model and refused if called anyway.
     public var disabledTools: Set<String>
+
+    // MARK: First run
+
+    /// Whether the welcome and permissions walkthrough has been finished (or skipped) once.
+    public var onboardingCompleted: Bool
 
     public init(
         speechEngine: SpeechEngineKind = .appleAutomatic,
@@ -99,8 +117,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         useRefusalFallback: Bool = true,
         maxAgentSteps: Int = 12,
         followUpWindowSeconds: Int = 120,
+        speakReplies: Bool = true,
+        voiceIdentifier: String = "",
+        speechRate: Double = AppSettings.defaultSpeechRate,
         confirmationStrictness: ConfirmationStrictness = .standard,
-        disabledTools: Set<String> = []
+        disabledTools: Set<String> = [],
+        onboardingCompleted: Bool = false
     ) {
         self.speechEngine = speechEngine
         self.localeIdentifier = localeIdentifier
@@ -117,8 +139,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.useRefusalFallback = useRefusalFallback
         self.maxAgentSteps = maxAgentSteps
         self.followUpWindowSeconds = followUpWindowSeconds
+        self.speakReplies = speakReplies
+        self.voiceIdentifier = voiceIdentifier
+        self.speechRate = speechRate
         self.confirmationStrictness = confirmationStrictness
         self.disabledTools = disabledTools
+        self.onboardingCompleted = onboardingCompleted
     }
 
     public var locale: Locale { Locale(identifier: localeIdentifier) }
@@ -127,7 +153,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case speechEngine, localeIdentifier, maxRecordingSeconds, downloadSpeechModel
         case provider, model, openAIModel, openAIBaseURL, ollamaModel, ollamaBaseURL, ollamaContextLength
         case effort, useRefusalFallback, maxAgentSteps, followUpWindowSeconds
-        case confirmationStrictness, disabledTools
+        case speakReplies, voiceIdentifier, speechRate
+        case confirmationStrictness, disabledTools, onboardingCompleted
     }
 
     public init(from decoder: any Decoder) throws {
@@ -160,8 +187,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
         maxAgentSteps = min(max(value(.maxAgentSteps, defaults.maxAgentSteps), 1), 25)
         followUpWindowSeconds = min(max(value(.followUpWindowSeconds, defaults.followUpWindowSeconds), 0), 600)
 
+        speakReplies = value(.speakReplies, defaults.speakReplies)
+        voiceIdentifier = text(.voiceIdentifier, defaults.voiceIdentifier, allowEmpty: true)
+        let rate = value(.speechRate, defaults.speechRate)
+        speechRate = rate.isFinite ? min(max(rate, Self.speechRateRange.lowerBound), Self.speechRateRange.upperBound) : defaults.speechRate
+
         confirmationStrictness = value(.confirmationStrictness, defaults.confirmationStrictness)
         disabledTools = value(.disabledTools, defaults.disabledTools)
+        onboardingCompleted = value(.onboardingCompleted, defaults.onboardingCompleted)
     }
 }
 
@@ -188,6 +221,22 @@ extension AppSettings {
         case .anthropic: nil
         case .openAI: URL(string: openAIBaseURL)
         case .ollama: URL(string: ollamaBaseURL)
+        }
+    }
+}
+
+extension AppSettings {
+    /// Whether the user has left `tool` switched on.
+    public func isToolEnabled(_ tool: String) -> Bool {
+        !disabledTools.contains(tool)
+    }
+
+    /// Switches a tool on or off. An off tool is hidden from the model and refused if called anyway.
+    public mutating func setTool(_ tool: String, enabled: Bool) {
+        if enabled {
+            disabledTools.remove(tool)
+        } else {
+            disabledTools.insert(tool)
         }
     }
 }

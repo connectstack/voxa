@@ -7,10 +7,12 @@ import VoxaTestSupport
 @testable import VoxaTools
 
 /// Builds the smallest input a schema accepts, so each tool's schema can be checked against its own `Decodable` input type.
-private func sample(from schema: JSONValue) -> JSONValue {
+/// Arguments that are dates get a date, since a schema can't say so.
+private func sample(from schema: JSONValue, key: String? = nil) -> JSONValue {
     switch schema["type"]?.stringValue {
     case "string":
         if let first = schema["enum"]?.arrayValue?.first { return first }
+        if let key, ["start", "end", "due", "new_start", "new_end"].contains(key) { return "2026-10-03T09:00:00+05:30" }
         return .string("Safari")
     case "integer": return .int(schema["minimum"]?.intValue ?? 1)
     case "number": return .double(1)
@@ -19,12 +21,18 @@ private func sample(from schema: JSONValue) -> JSONValue {
     case "object":
         var object: [String: JSONValue] = [:]
         let properties = schema["properties"]?.objectValue ?? [:]
-        for key in schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [] {
-            object[key] = sample(from: properties[key] ?? [:])
+        for name in schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [] {
+            object[name] = sample(from: properties[name] ?? [:], key: name)
         }
         return .object(object)
     default: return .null
     }
+}
+
+/// Messages a tool gives when it could not *read* the arguments, as opposed to declining what they ask for.
+private func isReadingProblem(_ message: String) -> Bool {
+    message.hasPrefix("Missing required argument") || message.contains("has the wrong type")
+        || message.contains("is invalid") || message.contains("could not be read")
 }
 
 @Suite("Standard tools")
@@ -39,7 +47,13 @@ struct StandardToolsTests {
     func definitions() {
         let names = tools.map(\.name)
         #expect(Set(names).count == names.count)
-        #expect(Set(names) == ["open_app", "open_url", "list_shortcuts", "run_shortcut", "run_applescript"])
+        #expect(
+            Set(names) == [
+                "open_app", "open_url", "list_shortcuts", "run_shortcut", "run_applescript",
+                "calendar_list_events", "calendar_create_event", "calendar_update_event", "calendar_delete_event",
+                "reminders_list", "reminders_create", "clipboard_read", "clipboard_write", "get_frontmost_context",
+            ]
+        )
         for tool in tools {
             #expect(tool.summary.count > 60, "\(tool.name)'s description should say when to use it")
             #expect(tool.definition.name == tool.name)
@@ -62,8 +76,10 @@ struct StandardToolsTests {
             #expect(InputValidator.validate(input, against: tool.inputSchema).isEmpty, "\(tool.name): \(input)")
             do {
                 _ = try tool.assess(input)
-            } catch let error as ToolInputError {
-                Issue.record("\(tool.name) rejected the sample its own schema produced: \(error.message)")
+            } catch let error as ToolInputError where isReadingProblem(error.message) {
+                Issue.record("\(tool.name) couldn't read the sample its own schema produced: \(error.message)")
+            } catch is ToolInputError {
+                // The tool understood the arguments and declined them (there is no such event in this sample), which is fine.
             }
         }
     }
@@ -76,9 +92,68 @@ struct StandardToolsTests {
         #expect(byName["list_shortcuts"] == .readOnly)
         #expect(byName["run_shortcut"] == .sensitive)
         #expect(byName["run_applescript"] == .sensitive)
-        // The policy floor must agree with the tools that can do damage.
-        #expect(PolicyFloors.floor(for: "run_shortcut") == .sensitive)
-        #expect(PolicyFloors.floor(for: "run_applescript") == .sensitive)
+        #expect(byName["calendar_list_events"] == .readOnly)
+        #expect(byName["calendar_create_event"] == .reversible)
+        #expect(byName["calendar_update_event"] == .sensitive)
+        #expect(byName["calendar_delete_event"] == .sensitive)
+        #expect(byName["reminders_list"] == .readOnly)
+        #expect(byName["reminders_create"] == .reversible)
+        #expect(byName["clipboard_read"] == .reversible)
+        #expect(byName["clipboard_write"] == .reversible)
+        #expect(byName["get_frontmost_context"] == .readOnly)
+    }
+
+    @Test("every tool that declares itself sensitive is also floored sensitive by the policy, so a wrong tool can't lower its own bar")
+    func floorsAgreeWithTools() {
+        for tool in tools where tool.baselineRisk == .sensitive {
+            #expect(PolicyFloors.floor(for: tool.name) == .sensitive, "\(tool.name)")
+        }
+        // The ones that can do damage or change what the user sees are pinned by name.
+        for name in ["run_shortcut", "run_applescript", "calendar_update_event", "calendar_delete_event"] {
+            #expect(PolicyFloors.floor(for: name) == .sensitive, "\(name)")
+        }
+        for name in ["calendar_create_event", "reminders_create", "clipboard_read", "clipboard_write"] {
+            #expect(PolicyFloors.floor(for: name) == .reversible, "\(name)")
+        }
+    }
+
+    @Test("the tools that read the calendar or reminders declare the permission they need")
+    func permissions() {
+        let byName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.requiredPermissions) })
+        for name in ["calendar_list_events", "calendar_create_event", "calendar_update_event", "calendar_delete_event"] {
+            #expect(byName[name] == [.calendars], "\(name)")
+        }
+        for name in ["reminders_list", "reminders_create"] {
+            #expect(byName[name] == [.reminders], "\(name)")
+        }
+        #expect(byName["run_applescript"] == [.automation])
+    }
+
+    @Test("what tools return from outside the app is marked untrusted: calendar, reminders, clipboard and window text")
+    func outsideContentIsUntrusted() async throws {
+        let sample = SystemAccess.sample(now: Date(timeIntervalSince1970: 1_790_739_000), timeZone: TimeZone(identifier: "Asia/Kolkata")!)
+        let tools = StandardTools.make(
+            catalog: FakeAppCatalog.standard,
+            opener: FakeOpener(),
+            runner: FakeProcessRunner(returning: ProcessOutput(status: 0)),
+            system: sample
+        )
+        let byName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
+        for name in ["calendar_list_events", "reminders_list", "clipboard_read", "get_frontmost_context"] {
+            let result = try await #require(byName[name]).execute([:], context: ToolContext())
+            #expect(result.provenance.isUntrusted, "\(name) returned \(result.plainText)")
+        }
+    }
+
+    @Test("every tool has a friendly title, a one-line description and a category for the Tools tab, so none shows up as a raw name")
+    func toolsTabText() {
+        for tool in tools {
+            let title = L10n.ToolsUI.title(for: tool.name)
+            #expect(!title.contains("_") && !title.isEmpty, "\(tool.name) shows as '\(title)'")
+            #expect(!L10n.ToolsUI.blurb(for: tool.name, fallback: "").isEmpty, "\(tool.name) has no description of its own")
+            #expect(L10n.ToolsUI.category(for: tool.name) != .other, "\(tool.name) has no category")
+        }
+        #expect(Set(tools.map { L10n.ToolsUI.title(for: $0.name) }).count == tools.count, "titles are all different")
     }
 
     @Test("no tool takes a shell command, and none is named like one")

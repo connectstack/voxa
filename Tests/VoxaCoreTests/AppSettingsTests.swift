@@ -162,10 +162,84 @@ struct AppSettingsTests {
         #expect(try JSONDecoder().decode(AppSettings.self, from: data) == original)
     }
 
+    // MARK: Voice and first run
+
+    @Test("voice settings default to speaking at the standard pace with the best installed voice")
+    func voiceDefaults() throws {
+        let settings = try decode("{}")
+        #expect(settings.speakReplies)
+        #expect(settings.voiceIdentifier.isEmpty)
+        #expect(settings.speechRate == AppSettings.defaultSpeechRate)
+        #expect(!settings.onboardingCompleted, "a first run, or a copy from before the walkthrough existed, is shown it once")
+    }
+
+    @Test("voice settings round trip, and the speech rate stays within what is offered", arguments: [
+        (0.0, 0.3), (0.3, 0.3), (0.5, 0.5), (0.7, 0.7), (3.0, 0.7), (-1.0, 0.3),
+    ])
+    func speechRate(input: Double, expected: Double) throws {
+        #expect(try decode(#"{"speechRate":\#(input)}"#).speechRate == expected)
+    }
+
+    @Test("bad voice values fall back without discarding the rest")
+    func badVoiceValues() throws {
+        let json = #"{"speakReplies":"loud","speechRate":"fast","voiceIdentifier":7,"onboardingCompleted":"yes","provider":"ollama"}"#
+        let settings = try decode(json)
+        #expect(settings.speakReplies)
+        #expect(settings.speechRate == AppSettings.defaultSpeechRate)
+        #expect(settings.voiceIdentifier.isEmpty)
+        #expect(!settings.onboardingCompleted)
+        #expect(settings.provider == .ollama)
+    }
+
+    @Test("a chosen voice and the finished walkthrough survive encoding")
+    func voiceRoundTrip() throws {
+        let original = AppSettings(
+            speakReplies: false, voiceIdentifier: "com.apple.voice.premium.en-US.Zoe", speechRate: 0.6, onboardingCompleted: true
+        )
+        let data = try JSONEncoder().encode(original)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: data) == original)
+    }
+
+    @Test("only Automation is granted per app")
+    func perApp() {
+        #expect(PermissionKind.allCases.filter(\.isPerApp) == [.automation])
+        #expect(Set(PermissionKind.allCases.filter(\.isGrantedInSystemSettings)) == [.accessibility, .screenRecording])
+        #expect(Set(PermissionKind.allCases.map(\.symbolName)).count == PermissionKind.allCases.count, "each has its own icon")
+    }
+
     @Test("the system locale identifier is a plain language_REGION without extensions")
     func systemLocale() {
         let identifier = AppSettings.systemLocaleIdentifier
         #expect(!identifier.contains("@"))
         #expect(!identifier.isEmpty)
+    }
+}
+
+@Suite("Tool switches")
+struct ToolSwitchTests {
+    @Test("every tool is on until it is switched off, and switching back on restores it")
+    func toggling() {
+        var settings = AppSettings()
+        #expect(settings.isToolEnabled("open_app"))
+        settings.setTool("open_app", enabled: false)
+        #expect(!settings.isToolEnabled("open_app"))
+        #expect(settings.disabledTools == ["open_app"])
+        settings.setTool("open_app", enabled: false)
+        #expect(settings.disabledTools == ["open_app"], "switching off twice changes nothing more")
+        settings.setTool("open_app", enabled: true)
+        #expect(settings.isToolEnabled("open_app") && settings.disabledTools.isEmpty)
+        settings.setTool("never_off", enabled: true)
+        #expect(settings.disabledTools.isEmpty)
+    }
+
+    @Test("the switches survive being saved and loaded")
+    func persists() throws {
+        var settings = AppSettings()
+        settings.setTool("run_applescript", enabled: false)
+        settings.setTool("calendar_delete_event", enabled: false)
+        let data = try JSONEncoder().encode(settings)
+        let loaded = try JSONDecoder().decode(AppSettings.self, from: data)
+        #expect(!loaded.isToolEnabled("run_applescript") && !loaded.isToolEnabled("calendar_delete_event"))
+        #expect(loaded.isToolEnabled("open_app"))
     }
 }

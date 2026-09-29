@@ -8,11 +8,11 @@ import VoxaLLM
 @MainActor
 public final class SettingsWindowController {
     private let store: SettingsStore
-    private let services: ProviderServices
+    private let services: SettingsServices
     private let navigation = SettingsNavigation()
     private var window: NSWindow?
 
-    public init(store: SettingsStore, services: ProviderServices = .inert) {
+    public init(store: SettingsStore, services: SettingsServices = .inert) {
         self.store = store
         self.services = services
     }

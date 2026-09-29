@@ -93,6 +93,50 @@ struct AuditLogTests {
         #expect(await log.entries().map(\.kind) == [.reply])
     }
 
+    @Test("reading gives the moved-aside entries first, so the whole history is there, oldest to newest")
+    func readsRotatedEntries() async throws {
+        let (log, directory) = makeLog(maxBytes: 600)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let rotated = directory.appendingPathComponent("audit.1.jsonl")
+
+        // Write until the file has been moved aside once, then a few more, stopping before it could be moved a second time
+        // (only one old file is kept, so a second move would drop the first entries).
+        var written = 0
+        while !FileManager.default.fileExists(atPath: rotated.path), written < 50 {
+            await log.record(entry(.command, detail: String(repeating: "x", count: 100) + "\(written % 10)"))
+            written += 1
+        }
+        for _ in 0..<2 {
+            await log.record(entry(.command, detail: String(repeating: "x", count: 100) + "\(written % 10)"))
+            written += 1
+        }
+        #expect(FileManager.default.fileExists(atPath: rotated.path), "the fixture must have rotated for this test to mean anything")
+        #expect(try !Data(contentsOf: log.url).isEmpty, "and the new file must hold some of the entries")
+
+        let digits = await log.readAll().compactMap(\.detail).map { String($0.last!) }
+        #expect(digits == (0..<written).map { String($0 % 10) }, "in order, none lost between the two files")
+    }
+
+    @Test("its size on disk covers both files, and is zero after clearing")
+    func size() async throws {
+        let (log, directory) = makeLog(maxBytes: 600)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(await log.sizeOnDisk() == 0)
+        for _ in 0..<10 { await log.record(entry(.command, detail: String(repeating: "z", count: 100))) }
+        let onDisk = try FileManager.default.contentsOfDirectory(atPath: directory.path).reduce(0) { total, name in
+            total + (try Data(contentsOf: directory.appendingPathComponent(name)).count)
+        }
+        #expect(await log.sizeOnDisk() == onDisk)
+        try await log.clear()
+        #expect(await log.sizeOnDisk() == 0)
+    }
+
+    @Test("the log can say where it lives, for Show in Finder")
+    func location() {
+        let (log, _) = makeLog()
+        #expect(log.location == log.url)
+    }
+
     @Test("reading a log that doesn't exist yet gives no entries, and a discarding log never fails")
     func empty() async {
         let (log, _) = makeLog()

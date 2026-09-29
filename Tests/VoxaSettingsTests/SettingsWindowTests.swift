@@ -1,9 +1,11 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
 import VoxaCore
 @testable import VoxaSettings
+import VoxaTestSupport
 
 /// These tests open a real window and run the run loop, so AppKit's display cycle (layout, constraint updates) actually
 /// happens. That is what once crashed the app on macOS 26 when Settings was opened: `NSHostingController` with
@@ -123,5 +125,124 @@ struct SettingsWindowTabTests {
         controller.show(tab: .safety)
         #expect(controller.selectedTab == .safety)
         controller.close()
+    }
+}
+
+@MainActor
+@Suite("Settings and walkthrough windows: every page", .serialized, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
+struct EveryPageWindowTests {
+    private func makeStore() -> SettingsStore {
+        SettingsStore(defaults: UserDefaults(suiteName: "com.rohitsainier.voxa.tests.pages.\(UUID().uuidString)")!)
+    }
+
+    private func pump(_ seconds: TimeInterval = 0.15) async {
+        try? await Task.sleep(for: .seconds(seconds))
+    }
+
+    /// Services with something in every list, so each page draws real rows rather than its empty state.
+    private func fullServices() -> SettingsServices {
+        var services = SettingsServices.inert
+        services.tools = [
+            ToolInfo(name: "open_app", summary: "Opens an app.", risk: .reversible),
+            ToolInfo(name: "calendar_list_events", summary: "Lists events.", risk: .readOnly, permissions: [.calendars]),
+            ToolInfo(name: "calendar_delete_event", summary: "Deletes an event.", risk: .sensitive, permissions: [.calendars]),
+            ToolInfo(name: "run_applescript", summary: "Runs a script.", risk: .sensitive, permissions: [.automation]),
+        ]
+        services.audit = RecordingAuditLog(
+            (0..<6).flatMap { index -> [AuditEntry] in
+                let run = UUID()
+                return [
+                    AuditEntry(runID: run, kind: .command, detail: "command \(index)"),
+                    AuditEntry(runID: run, kind: .toolProposed, tool: "open_app"),
+                    AuditEntry(runID: run, kind: .reply, outcome: "completed", detail: "Done."),
+                ]
+            }
+        )
+        return services
+    }
+
+    @Test("opening every tab of Settings in a real window, with rows on each, never crashes and never changes the window's size")
+    func everyTab() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let controller = SettingsWindowController(store: makeStore(), services: fullServices())
+        controller.show(tab: .general)
+        await pump(0.3)
+        let size = try #require(controller.windowFrame).size
+
+        for tab in SettingsView.Tab.allCases + SettingsView.Tab.allCases.reversed() {
+            controller.show(tab: tab)
+            await pump()
+            #expect(controller.selectedTab == tab)
+            #expect(controller.windowFrame?.size == size, "\(tab) resized the window")
+        }
+        controller.close()
+    }
+
+    @Test("the walkthrough opens in a real window, is a fixed size, and can be opened again and closed repeatedly")
+    func walkthroughWindow() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let controller = OnboardingWindowController(store: makeStore(), services: fullServices())
+        #expect(!controller.isVisible)
+        controller.show()
+        await pump(0.3)
+        #expect(controller.isVisible)
+        let frame = try #require(NSApp.windows.first { $0.title == L10n.Onboarding.windowTitle }?.frame)
+        #expect(frame.width == OnboardingView.contentSize.width)
+
+        for _ in 0..<6 {
+            controller.show()
+            await pump(0.05)
+            controller.close()
+            await pump(0.03)
+        }
+        #expect(!controller.isVisible)
+    }
+
+    @Test("the walkthrough opens by itself the first time only")
+    func firstTimeOnly() async {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let store = makeStore()
+        let controller = OnboardingWindowController(store: store, services: fullServices())
+
+        controller.showIfNeeded()
+        await pump(0.2)
+        #expect(controller.isVisible, "not finished yet, so it opens")
+        controller.close()
+
+        store.current.onboardingCompleted = true
+        controller.showIfNeeded()
+        await pump(0.2)
+        #expect(!controller.isVisible, "finished, so it stays away until asked for")
+    }
+
+    @Test("closing the walkthrough any way at all counts as having seen it, so it doesn't come back on every launch")
+    func closingCountsAsSeen() async {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let store = makeStore()
+        let controller = OnboardingWindowController(store: store, services: fullServices())
+        #expect(!store.current.onboardingCompleted)
+        controller.show()
+        await pump(0.2)
+        NSApp.windows.first { $0.title == L10n.Onboarding.windowTitle }?.close()
+        await pump(0.1)
+        #expect(store.current.onboardingCompleted)
+    }
+
+    @Test("each step of the walkthrough lays out at the window's size without trouble")
+    func everyStepLaysOut() async {
+        _ = NSApplication.shared
+        for step in OnboardingModel.Step.allCases {
+            let view = OnboardingView(store: makeStore(), services: fullServices(), startingAt: step) {}
+            let host = NSHostingView(rootView: view)
+            host.sizingOptions = []
+            host.frame = NSRect(origin: .zero, size: OnboardingView.contentSize)
+            host.layoutSubtreeIfNeeded()
+            #expect(host.frame.size == OnboardingView.contentSize, "\(step)")
+            await pump(0.05)
+        }
     }
 }

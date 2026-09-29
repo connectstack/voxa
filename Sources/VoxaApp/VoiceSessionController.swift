@@ -75,6 +75,7 @@ public final class VoiceSessionController {
     let openModelSettings: @MainActor () -> Void
     let agent: (any AgentRunning)?
     let confirmations: (any ConfirmationResponding)?
+    let speaker: ReplySpeaker?
     let now: @Sendable () -> Date
 
     @ObservationIgnored var run: Run?
@@ -101,6 +102,7 @@ public final class VoiceSessionController {
         openModelSettings: @escaping @MainActor () -> Void = {},
         agent: (any AgentRunning)? = nil,
         confirmations: (any ConfirmationResponding)? = nil,
+        speaker: ReplySpeaker? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.capture = capture
@@ -115,6 +117,7 @@ public final class VoiceSessionController {
         self.openModelSettings = openModelSettings
         self.agent = agent
         self.confirmations = confirmations
+        self.speaker = speaker
         self.now = now
     }
 
@@ -154,6 +157,8 @@ public final class VoiceSessionController {
 
     /// The push-to-talk key went down.
     public func pressBegan() {
+        // Voxa must not talk over the person, or let its own voice reach the microphone as the next command.
+        speaker?.stop()
         if let run, !run.isFinished {
             Log.session.debug("press ignored: a command is already in progress")
             return
@@ -216,6 +221,7 @@ public final class VoiceSessionController {
 
     /// The user pressed Esc: abort the running command, or dismiss a result or error that is still showing.
     public func cancel() {
+        speaker?.stop()
         if agentTask != nil {
             Log.session.info("command cancelled by the user")
             cancelAgent()

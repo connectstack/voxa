@@ -1,8 +1,5 @@
-import KeyboardShortcuts
 import SwiftUI
 import VoxaCore
-import VoxaLLM
-import VoxaSpeech
 
 /// Which tab of Settings is showing. The window controller holds it, so other parts of the app (an error's "Open Settings"
 /// button) can send the user to the tab where the problem is put right.
@@ -16,20 +13,20 @@ public final class SettingsNavigation {
     }
 }
 
-/// The Settings window's content: general (shortcut and speech), model (API key, model, thinking) and safety
-/// (confirmation strictness and limits). Tabs for tools and the audit log arrive with the features they configure.
+/// The Settings window's content: general (shortcut, speech, voice), model (provider, key, model), tools (a switch for each),
+/// permissions, safety (confirmation strictness and limits) and history (the audit trail).
 public struct SettingsView: View {
     /// The window is a fixed size (each tab's form scrolls if it ever outgrows it), which keeps window sizing out of Auto
     /// Layout entirely; see `SettingsWindowController`.
-    public static let contentSize = CGSize(width: 520, height: 480)
+    public static let contentSize = CGSize(width: 560, height: 500)
 
     @Bindable private var store: SettingsStore
     @Bindable private var navigation: SettingsNavigation
-    private let services: ProviderServices
+    private let services: SettingsServices
 
     public init(
         store: SettingsStore,
-        services: ProviderServices = .inert,
+        services: SettingsServices = .inert,
         navigation: SettingsNavigation = SettingsNavigation()
     ) {
         self.store = store
@@ -38,14 +35,17 @@ public struct SettingsView: View {
     }
 
     public enum Tab: String, CaseIterable, Identifiable {
-        case general, model, safety
+        case general, model, tools, permissions, safety, history
         public var id: String { rawValue }
 
         var title: String {
             switch self {
             case .general: L10n.Settings.general
             case .model: L10n.SettingsModel.tab
+            case .tools: L10n.ToolsUI.tab
+            case .permissions: L10n.PermissionsUI.tab
             case .safety: L10n.SettingsModel.safetyTab
+            case .history: L10n.HistoryUI.tab
             }
         }
     }
@@ -61,9 +61,12 @@ public struct SettingsView: View {
                 .padding(.bottom, 4)
 
             switch navigation.tab {
-            case .general: GeneralSettingsView(store: store)
+            case .general: GeneralSettingsView(store: store, services: services)
             case .model: ModelSettingsView(store: store, services: services)
+            case .tools: ToolsSettingsView(store: store, tools: services.tools, permissions: services.permissions)
+            case .permissions: PermissionsSettingsView(model: services.permissions)
             case .safety: SafetySettingsView(store: store)
+            case .history: HistorySettingsView(audit: services.audit)
             }
         }
         .frame(width: Self.contentSize.width, height: Self.contentSize.height)
@@ -82,6 +85,7 @@ private struct TabBar: View {
                 } label: {
                     Text(tab.title)
                         .font(.callout.weight(isSelected ? .semibold : .regular))
+                        .lineLimit(1)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                         .background(
@@ -97,58 +101,5 @@ private struct TabBar: View {
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.07)))
-    }
-}
-
-/// The shortcut and speech recognition settings.
-struct GeneralSettingsView: View {
-    @Bindable var store: SettingsStore
-    @State private var languages: [SpeechLanguage] = []
-
-    var body: some View {
-        Form {
-            Section {
-                KeyboardShortcuts.Recorder(for: .pushToTalk) {
-                    Text(L10n.Settings.pushToTalk)
-                }
-                Text(L10n.Settings.pushToTalkHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Picker(L10n.Settings.speechEngine, selection: $store.current.speechEngine) {
-                    Text(L10n.Settings.engineAutomatic).tag(SpeechEngineKind.appleAutomatic)
-                    Text(L10n.Settings.engineClassic).tag(SpeechEngineKind.appleClassic)
-                }
-                Picker(L10n.Settings.language, selection: $store.current.localeIdentifier) {
-                    ForEach(languageChoices) { language in
-                        Text(language.name).tag(language.id)
-                    }
-                }
-                Text(L10n.Settings.engineHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Toggle(L10n.Settings.downloadModel, isOn: $store.current.downloadSpeechModel)
-                    .disabled(store.current.speechEngine == .appleClassic)
-                Text(L10n.Settings.downloadModelHelp)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .task {
-            // Building the list instantiates a recognizer per language, so keep it off the main thread.
-            languages = await Task.detached { SpeechLanguages.available() }.value
-        }
-    }
-
-    /// The system's languages, plus the current selection if the system doesn't list it (so the picker never
-    /// shows a blank value).
-    private var languageChoices: [SpeechLanguage] {
-        let selected = store.current.localeIdentifier
-        guard !languages.contains(where: { $0.id == selected }) else { return languages }
-        let name = Locale.current.localizedString(forIdentifier: selected) ?? selected
-        return [SpeechLanguage(id: selected, name: name, supportsOnDevice: false)] + languages
     }
 }

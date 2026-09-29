@@ -65,6 +65,7 @@ extension VoiceSessionController {
         Log.session.error("command failed: \(error.title, privacy: .public)")
 
         hud.show(.error(error))
+        speaker?.speakError(error)
         hud.hide(after: configuration.errorDisplay)
         armDismiss(for: configuration.errorDisplay)
 

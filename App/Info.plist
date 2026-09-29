@@ -45,13 +45,13 @@
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Voxa uses Automation to control other apps when you ask it to, for example opening a document or running a script.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Voxa reads and creates calendar events when you ask it to.</string>
+	<string>Voxa reads, adds, changes and deletes calendar events when you ask it to, and asks you first before changing or deleting one.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>Voxa reads and creates calendar events when you ask it to.</string>
+	<string>Voxa reads, adds, changes and deletes calendar events when you ask it to, and asks you first before changing or deleting one.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Voxa creates reminders when you ask it to.</string>
+	<string>Voxa reads and adds reminders when you ask it to.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>Voxa creates reminders when you ask it to.</string>
+	<string>Voxa reads and adds reminders when you ask it to.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Voxa connects to an Ollama server on your network only if you choose one in Settings.</string>
 

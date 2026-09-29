@@ -184,10 +184,16 @@ public enum L10n {
                         "Voxa needs this to look at your screen when other methods fail. Turn it on in System Settings → Privacy & Security → \(pane).",
                     comment: "Permission detail"
                 )
-            case .calendars, .reminders:
+            case .calendars:
                 String(
                     localized:
-                        "Voxa needs this to read and create items for you. Turn it on in System Settings → Privacy & Security → \(pane).",
+                        "Voxa needs this to read and change your calendar for you. Turn it on in System Settings → Privacy & Security → \(pane).",
+                    comment: "Permission detail"
+                )
+            case .reminders:
+                String(
+                    localized:
+                        "Voxa needs this to read and add your reminders for you. Turn it on in System Settings → Privacy & Security → \(pane).",
                     comment: "Permission detail"
                 )
             case .automation:

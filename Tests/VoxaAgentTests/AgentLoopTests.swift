@@ -28,6 +28,7 @@ struct LoopHarness {
         _ turns: [ScriptedLLM.Turn],
         tools: [any AgentTool] = [],
         confirmations: ScriptedConfirmations = ScriptedConfirmations(),
+        permissions: any ToolPermissionGranting = UnrestrictedToolPermissions(),
         limits: AgentLimits = AgentLimits(),
         settings: AppSettings = AppSettings(localeIdentifier: "en_US")
     ) {
@@ -38,6 +39,7 @@ struct LoopHarness {
             llm: llm,
             registry: ToolRegistry(tools),
             confirmations: confirmations,
+            permissions: permissions,
             audit: audit,
             systemPrompt: SystemPrompt(template: "You are a test. At most {{max_steps}} steps."),
             clock: clock,

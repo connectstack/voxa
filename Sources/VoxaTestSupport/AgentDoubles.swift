@@ -215,6 +215,40 @@ public struct StubTool: AgentTool {
     }
 }
 
+// MARK: - Permissions
+
+/// Grants tool permissions as the test dictates, remembers what was asked, and can hold a "prompt" open.
+public final class ScriptedToolPermissions: ToolPermissionGranting, @unchecked Sendable {
+    private struct State {
+        var statuses: [PermissionKind: PermissionStatus]
+        var asked: [[PermissionKind]] = []
+    }
+
+    private let state: OSAllocatedUnfairLock<State>
+    private let gate: AsyncGate?
+
+    /// - Parameters:
+    ///   - statuses: What each permission's answer is; anything not listed is granted.
+    ///   - gate: When set, every request waits for it to open, like a system prompt nobody has answered yet.
+    public init(_ statuses: [PermissionKind: PermissionStatus] = [:], gate: AsyncGate? = nil) {
+        state = OSAllocatedUnfairLock(initialState: State(statuses: statuses))
+        self.gate = gate
+    }
+
+    /// Every set of permissions the loop asked about, in order.
+    public var asked: [[PermissionKind]] { state.withLock { $0.asked } }
+
+    public func ensureGranted(_ kinds: [PermissionKind]) async -> UserFacingError? {
+        state.withLock { $0.asked.append(kinds) }
+        await gate?.wait()
+        for kind in kinds {
+            let status = state.withLock { $0.statuses[kind] } ?? .granted
+            if !status.isGranted { return .permissionRequired(kind, status: status) }
+        }
+        return nil
+    }
+}
+
 // MARK: - Confirmation and audit
 
 /// Answers confirmation prompts from a script and remembers what it was asked.
@@ -279,15 +313,36 @@ public final class ScriptedConfirmations: ConfirmationProviding, @unchecked Send
     }
 }
 
-/// Keeps every audit entry in memory.
-public actor RecordingAuditLog: AuditLogging {
+/// Keeps every audit entry in memory, and can be read back and cleared like the real trail.
+public actor RecordingAuditLog: AuditLogging, AuditReading {
     public private(set) var entries: [AuditEntry] = []
+    public private(set) var clearCount = 0
+    /// Makes the next `clear()` throw, as a file that can't be deleted would.
+    public var clearFailure: (any Error)?
 
-    public init() {}
+    public init(_ entries: [AuditEntry] = []) {
+        self.entries = entries
+    }
 
     public func record(_ entry: AuditEntry) {
         entries.append(entry)
     }
+
+    public func readAll() -> [AuditEntry] { entries }
+
+    public func clear() throws {
+        if let clearFailure { throw clearFailure }
+        clearCount += 1
+        entries = []
+    }
+
+    public func setClearFailure(_ error: (any Error)?) {
+        clearFailure = error
+    }
+
+    public nonisolated var location: URL? { nil }
+
+    public func sizeOnDisk() -> Int { entries.count * 200 }
 
     /// `kind:outcome` for each entry, for compact assertions.
     public var summary: [String] {

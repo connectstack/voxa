@@ -196,7 +196,8 @@ extension AppEnvironment {
             }
         }
         // The same, on a given tab, as an error's "Open Settings" button does for a model problem.
-        for (name, tab) in [("model", SettingsView.Tab.model), ("safety", .safety), ("general", .general)] {
+        for tab in SettingsView.Tab.allCases {
+            let name = tab.rawValue
             var tabToken: Int32 = 0
             notify_register_dispatch("com.rohitsainier.voxa.debug.settings.tab.\(name)", &tabToken, .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.settingsWindow.show(tab: tab) }
@@ -208,6 +209,37 @@ extension AppEnvironment {
             let name = "com.rohitsainier.voxa.debug.provider.\(provider.rawValue.lowercased())"
             notify_register_dispatch(name, &providerToken, .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.settings.current.provider = provider }
+            }
+        }
+        // The first-run walkthrough, and speaking a reply as if the agent had produced it (`say.txt` is read from
+        // VOXA_DEBUG_SAY_FILE), so both can be seen and heard without setting up a first run or a command.
+        var welcomeToken: Int32 = 0
+        notify_register_dispatch("com.rohitsainier.voxa.debug.onboarding", &welcomeToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onboardingWindow.show() }
+        }
+        for step in 0..<WelcomePreview.stepCount {
+            var stepToken: Int32 = 0
+            notify_register_dispatch("com.rohitsainier.voxa.debug.onboarding.step.\(step)", &stepToken, .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onboardingWindow.show(step: step) }
+            }
+        }
+        // The button in Settings → General that opens the guide, pressed through the services Settings itself is given.
+        var welcomeButtonToken: Int32 = 0
+        notify_register_dispatch("com.rohitsainier.voxa.debug.button.welcomeGuide", &welcomeButtonToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.settingsServices.showWelcome() }
+        }
+        var welcomeCloseToken: Int32 = 0
+        notify_register_dispatch("com.rohitsainier.voxa.debug.onboarding.close", &welcomeCloseToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onboardingWindow.close() }
+        }
+        var sayToken: Int32 = 0
+        notify_register_dispatch("com.rohitsainier.voxa.debug.say", &sayToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard
+                    let path = ProcessInfo.processInfo.environment["VOXA_DEBUG_SAY_FILE"],
+                    let text = try? String(contentsOfFile: path, encoding: .utf8)
+                else { return }
+                self?.speaker.speakReply(text.trimmingCharacters(in: .whitespacesAndNewlines))
             }
         }
         var closeToken: Int32 = 0
@@ -224,6 +256,8 @@ extension AppEnvironment {
             + "escapeListeners=\(counts.escape) allowListeners=\(counts.allowKey) "
             + "mic=\(permissions.status(of: .microphone)) speech=\(permissions.status(of: .speechRecognition)) "
             + "provider=\(settings.current.provider.rawValue) settingsTab=\(settingsWindow.selectedTab.rawValue) "
+            + "welcome=\(onboardingWindow.isVisible) speaking=\(speaker.isSpeaking) "
+            + "accessibility=\(permissions.status(of: .accessibility)) "
             + "hasKey=\(keyStores[settings.current.provider]?.hasKey() ?? false)\n"
         try? line.write(toFile: path, atomically: true, encoding: .utf8)
     }

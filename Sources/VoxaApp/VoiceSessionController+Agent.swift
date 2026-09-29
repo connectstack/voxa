@@ -74,6 +74,7 @@ extension VoiceSessionController {
         case .completed, .limitReached, .timedOut, .refused, .stoppedAfterDeclines:
             let duration = replyDuration(for: result.reply)
             hud.show(.reply(result.reply))
+            speaker?.speakReply(result.reply)
             hud.hide(after: duration)
             armDismiss(for: duration, keeping: watcher)
         }
