@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import os
 import VoxaCore
 
 /// Remembers the app that was in front before Voxa took focus. Voxa's own windows (Settings, a permission prompt) make Voxa
@@ -14,21 +15,43 @@ final class FrontmostAppTracker {
     }
 
     private var lastOther: App?
-    /// Kept only so the observation lives as long as the tracker, which is as long as the app.
-    private var observer: (any NSObjectProtocol)?
+    /// Kept only so the observations live as long as the tracker, which is as long as the app.
+    private var observers: [any NSObjectProtocol] = []
     private let ownBundleID = Bundle.main.bundleIdentifier
+    /// Told the app in front whenever it changes, so that a tool can ask for it from anywhere without waiting for the main actor.
+    private let publish: @Sendable (FrontmostApp?) -> Void
 
-    init() {
+    init(publish: @escaping @Sendable (FrontmostApp?) -> Void) {
+        self.publish = publish
         lastOther = Self.snapshot(NSWorkspace.shared.frontmostApplication).flatMap { isVoxa($0) ? nil : $0 }
-        observer = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication).flatMap(Self.snapshot)
-            MainActor.assumeIsolated {
-                guard let self, let app, !self.isVoxa(app) else { return }
-                self.lastOther = app
+        publish(lastOther.map(Self.published))
+
+        let center = NSWorkspace.shared.notificationCenter
+        observers.append(
+            center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+                let app = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication).flatMap(Self.snapshot)
+                MainActor.assumeIsolated {
+                    guard let self, let app, !self.isVoxa(app) else { return }
+                    self.lastOther = app
+                    self.publish(Self.published(app))
+                }
             }
-        }
+        )
+        // An app that has quit is no longer "the app in front".
+        observers.append(
+            center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+                let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
+                MainActor.assumeIsolated {
+                    guard let self, let pid, self.lastOther?.pid == pid else { return }
+                    self.lastOther = nil
+                    self.publish(nil)
+                }
+            }
+        )
+    }
+
+    private nonisolated static func published(_ app: App) -> FrontmostApp {
+        FrontmostApp(name: app.name, bundleID: app.bundleID, pid: app.pid)
     }
 
     /// The app in front, or the last one that was if Voxa itself is.
@@ -55,16 +78,26 @@ final class FrontmostAppTracker {
 }
 
 /// The real thing: the app in front, and with Accessibility granted, its window title and the text selected in it.
-public final class SystemFrontmostContext: FrontmostContextProviding, @unchecked Sendable {
+public final class SystemFrontmostContext: FrontmostContextProviding, FrontmostAppProviding, @unchecked Sendable {
+    /// The app in front as of the last change, readable from anywhere without a hop to the main actor.
+    private let latest = OSAllocatedUnfairLock<FrontmostApp?>(initialState: nil)
     /// Made on first use, on the main actor, so creating this type never needs the main actor.
-    private let tracker = TrackerBox()
+    private let tracker: TrackerBox
 
-    public init() {}
+    public init() {
+        let latest = latest
+        tracker = TrackerBox { app in latest.withLock { $0 = app } }
+    }
 
     /// Starts following which app is in front. Call once at launch, on the main actor.
     @MainActor
     public func start() {
         tracker.startIfNeeded()
+    }
+
+    /// The app in front, as last seen. Nil until `start()` has run.
+    public func currentApp() -> FrontmostApp? {
+        latest.withLock { $0 }
     }
 
     public func snapshot() async -> FrontmostContext? {
@@ -87,10 +120,15 @@ public final class SystemFrontmostContext: FrontmostContextProviding, @unchecked
 /// Holds the main-actor tracker for a type that isn't itself main-actor bound.
 private final class TrackerBox: @unchecked Sendable {
     @MainActor private var tracker: FrontmostAppTracker?
+    private let publish: @Sendable (FrontmostApp?) -> Void
+
+    init(publish: @escaping @Sendable (FrontmostApp?) -> Void) {
+        self.publish = publish
+    }
 
     @MainActor
     func startIfNeeded() {
-        if tracker == nil { tracker = FrontmostAppTracker() }
+        if tracker == nil { tracker = FrontmostAppTracker(publish: publish) }
     }
 
     @MainActor

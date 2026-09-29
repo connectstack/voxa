@@ -87,6 +87,18 @@ final class SessionHarness {
         await releaseAndFinishTail()
     }
 
+    /// Moves the clock on, and on again, until `condition` holds.
+    ///
+    /// The controller arms its timers from tasks of its own, which can run a moment after the screen shows what they belong to.
+    /// One advance made in that moment passes over a timer that doesn't exist yet, and the wait after it would never end;
+    /// moving on again each time round finds the timer once it does.
+    func advanceClock(by step: Duration, until condition: @MainActor () -> Bool) async -> Bool {
+        await waitUntil {
+            clock.advance(by: step)
+            return condition()
+        }
+    }
+
     /// Whether the most recent HUD state is the "hold the shortcut" hint shown after a tap.
     var holdHintIsShowing: Bool {
         if case .notice(let title, _) = hud.lastMode { title == L10n.HUD.holdToTalk } else { false }

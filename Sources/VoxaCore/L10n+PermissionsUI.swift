@@ -24,9 +24,9 @@ extension L10n {
             case .speechRecognition:
                 String(localized: "Turns your voice into text on this Mac, never on a server.", comment: "What the Speech Recognition permission is for")
             case .accessibility:
-                String(localized: "Lets Voxa see which app is in front and what you have selected there.", comment: "What the Accessibility permission is for")
+                String(localized: "Lets Voxa see what is in front, and press buttons and type in other apps when you ask.", comment: "What the Accessibility permission is for")
             case .screenRecording:
-                String(localized: "Lets Voxa look at the screen when nothing else works.", comment: "What the Screen Recording permission is for")
+                String(localized: "Lets Voxa look at the front window when it can't read an app any other way.", comment: "What the Screen Recording permission is for")
             case .calendars:
                 String(localized: "Reads, adds and changes your calendar events when you ask.", comment: "What the Calendars permission is for")
             case .reminders:

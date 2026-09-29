@@ -48,6 +48,9 @@ public enum SpeechError: Error, Sendable, Equatable {
     case recognizerUnavailable
     case recognitionFailed(String)
     case modelDownloadFailed(String)
+    /// The Whisper model chosen in Settings hasn't been downloaded (or was removed), so there is nothing to transcribe with.
+    case whisperModelMissing(name: String)
+    case whisperFailed(String)
 }
 
 extension SpeechError: UserFacingConvertible {
@@ -82,6 +85,14 @@ extension SpeechError: UserFacingConvertible {
                 title: L10n.Errors.modelDownloadFailedTitle,
                 detail: L10n.Errors.modelDownloadFailedDetail(reason)
             )
+        case .whisperModelMissing(let name):
+            UserFacingError(
+                title: L10n.WhisperUI.missingTitle,
+                detail: L10n.WhisperUI.missingDetail(name),
+                recovery: .openAppSettings
+            )
+        case .whisperFailed(let reason):
+            UserFacingError(title: L10n.WhisperUI.failedTitle, detail: L10n.WhisperUI.failedDetail(reason))
         }
     }
 }

@@ -50,7 +50,9 @@ struct OllamaClientTests {
 
     @Test("a tool call comes back ready to run")
     func toolCall() async throws {
-        let transport = MockHTTPTransport([.stream(OllamaNDJSON.toolCallResponse(name: "open_app", arguments: ["name": "Safari"]))])
+        let transport = MockHTTPTransport([
+            .stream(OllamaNDJSON.toolCallResponse(name: "open_app", arguments: ["name": "Safari"]))
+        ])
         let response = try await client(transport).complete(request())
         #expect(response.stopReason == .toolUse)
         #expect(response.executableToolUses.map(\.name) == ["open_app"])
@@ -69,6 +71,56 @@ struct OllamaClientTests {
         #expect(transport.body(ofRequest: 0)?["options"]?["num_ctx"] == 8_192)
     }
 
+    // MARK: Pictures
+
+    private func requestWithPicture(model: String) -> LLMRequest {
+        let result: [ToolResultBlock] = [.text("Screenshot s1"), .image(mediaType: "image/png", base64: "AAAA")]
+        return LLMRequest(
+            model: model,
+            system: [SystemBlock("sys")],
+            messages: [
+                .user("what is on screen"),
+                LLMMessage(role: .assistant, content: [.toolUse(id: "call_1", name: "screenshot", input: [:])]),
+                LLMMessage(
+                    role: .user,
+                    content: [.toolResult(toolUseID: "call_1", content: result, isError: false)]
+                ),
+            ],
+            provider: .ollama,
+            contextLength: 8_192
+        )
+    }
+
+    private func sentImages(_ transport: MockHTTPTransport) -> [JSONValue] {
+        (transport.body(ofRequest: 0)?["messages"]?.arrayValue ?? []).compactMap { $0["images"] }
+    }
+
+    @Test("a model that can see is sent the picture")
+    func visionModelGetsPictures() async throws {
+        let discovery = FakeOllamaDiscovery(details: ["llava:7b": OllamaModelDetails(capabilities: ["tools", "vision"])])
+        let transport = MockHTTPTransport([.stream(OllamaNDJSON.textResponse(["A browser."]))])
+        _ = try await client(transport, discovery: discovery).complete(requestWithPicture(model: "llava:7b"))
+        #expect(sentImages(transport).count == 1)
+    }
+
+    @Test("a model that can't see is told so in words instead of being sent a picture that would make it fail")
+    func blindModelGetsANote() async throws {
+        let discovery = FakeOllamaDiscovery(details: ["qwen3:8b": OllamaModelDetails(capabilities: ["tools"])])
+        let transport = MockHTTPTransport([.stream(OllamaNDJSON.textResponse(["I can't see it."]))])
+        _ = try await client(transport, discovery: discovery).complete(requestWithPicture(model: "qwen3:8b"))
+        #expect(sentImages(transport).isEmpty)
+        let bodies = (transport.body(ofRequest: 0)?["messages"]?.arrayValue ?? []).compactMap { $0["content"]?.stringValue }
+        #expect(bodies.contains { $0.contains("can't see images") })
+    }
+
+    @Test("when the server can't be asked what the model can do, the picture is sent as it was")
+    func unknownModelKeepsPictures() async throws {
+        let discovery = FakeOllamaDiscovery(failure: LLMError.unreachable("localhost"))
+        let transport = MockHTTPTransport([.stream(OllamaNDJSON.textResponse(["ok"]))])
+        _ = try await client(transport, discovery: discovery).complete(requestWithPicture(model: "mystery:1b"))
+        #expect(sentImages(transport).count == 1)
+    }
+
     // MARK: Failures that are not retried
 
     @Test("with no model chosen nothing is sent")
@@ -81,13 +133,17 @@ struct OllamaClientTests {
     @Test("a model that isn't installed is named, and not retried")
     func notInstalled() async {
         let transport = MockHTTPTransport([.ollamaError(status: 404, message: "model 'llama9' not found")])
-        await #expect(throws: LLMError.modelNotInstalled("llama9")) { try await client(transport).complete(request(model: "llama9")) }
+        await #expect(throws: LLMError.modelNotInstalled("llama9")) {
+            try await client(transport).complete(request(model: "llama9"))
+        }
         #expect(transport.requestCount == 1)
     }
 
     @Test("a model that can't call tools is named, and not retried")
     func noTools() async {
-        let transport = MockHTTPTransport([.ollamaError(status: 400, message: "registry.ollama.ai/library/gemma2:2b does not support tools")])
+        let transport = MockHTTPTransport([
+            .ollamaError(status: 400, message: "registry.ollama.ai/library/gemma2:2b does not support tools")
+        ])
         await #expect(throws: LLMError.modelCannotUseTools("gemma2:2b")) {
             try await client(transport).complete(request(model: "gemma2:2b"))
         }
@@ -205,7 +261,9 @@ struct OllamaClientTests {
     @Test("what a model can do is asked once, not for every step of a command")
     func detailsCached() async throws {
         let discovery = details(.toggle)
-        let transport = MockHTTPTransport([.stream(OllamaNDJSON.textResponse(["one"])), .stream(OllamaNDJSON.textResponse(["two"]))])
+        let transport = MockHTTPTransport([
+            .stream(OllamaNDJSON.textResponse(["one"])), .stream(OllamaNDJSON.textResponse(["two"])),
+        ])
         let ollama = client(transport, discovery: discovery)
         _ = try await ollama.complete(request(effort: .low))
         _ = try await ollama.complete(request(effort: .low))

@@ -111,6 +111,8 @@ public struct RunShortcutTool: TypedTool {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        // The folder made just above, for the Shortcut's input and output: Voxa's own temporary files, not the person's.
+        // swiftlint:disable:next no_file_deletion_in_tools
         defer { try? FileManager.default.removeItem(at: scratch) }
 
         var arguments = ["run", input.name]

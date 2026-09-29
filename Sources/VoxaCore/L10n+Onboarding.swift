@@ -17,13 +17,13 @@ extension L10n {
             String(localized: "Hold \(shortcut), say what you want, and let go. Voxa does it and tells you what happened.", comment: "Welcome step. The argument is the push-to-talk shortcut")
         }
         public static var welcomeCan: String {
-            String(localized: "It can open apps and links, work with your calendar, reminders and clipboard, and run your Shortcuts.", comment: "Welcome step")
+            String(localized: "It can open apps and links, work with your calendar, reminders, clipboard and files, use other apps for you, and run your Shortcuts.", comment: "Welcome step")
         }
         public static var welcomeAsks: String {
             String(localized: "It asks first before anything that can't be undone, and you can say yes or no out loud.", comment: "Welcome step")
         }
         public static var welcomePrivate: String {
-            String(localized: "Your voice is turned into text on this Mac and never leaves it. Only the words of your command go to the model you choose.", comment: "Welcome step")
+            String(localized: "Your voice is turned into text on this Mac and never leaves it. The model you choose gets the words of your command, and whatever Voxa has to read to carry it out, such as a calendar entry or what is in a window.", comment: "Welcome step")
         }
 
         // MARK: Permissions

@@ -23,6 +23,9 @@ struct GeneralSettingsView: View {
         Form {
             shortcutSection
             speechSection
+            if store.current.speechEngine == .whisper {
+                WhisperModelsSection(store: store, models: services.whisper)
+            }
             voiceSection
             startupSection
         }
@@ -55,6 +58,7 @@ struct GeneralSettingsView: View {
             Picker(L10n.Settings.speechEngine, selection: $store.current.speechEngine) {
                 Text(L10n.Settings.engineAutomatic).tag(SpeechEngineKind.appleAutomatic)
                 Text(L10n.Settings.engineClassic).tag(SpeechEngineKind.appleClassic)
+                Text(L10n.Settings.engineWhisper).tag(SpeechEngineKind.whisper)
             }
             Picker(L10n.Settings.language, selection: $store.current.localeIdentifier) {
                 ForEach(languageChoices) { language in
@@ -65,7 +69,7 @@ struct GeneralSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle(L10n.Settings.downloadModel, isOn: $store.current.downloadSpeechModel)
-                .disabled(store.current.speechEngine == .appleClassic)
+                .disabled(store.current.speechEngine != .appleAutomatic)
             Text(L10n.Settings.downloadModelHelp)
                 .font(.caption)
                 .foregroundStyle(.secondary)

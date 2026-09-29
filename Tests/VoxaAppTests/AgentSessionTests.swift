@@ -139,6 +139,7 @@ struct AgentSessionTests {
         let (harness, agent) = harness(script)
         await reachAgent(harness)
 
+        #expect(await waitUntil { agent.commands.count == 1 }, "an event is only heard once the agent has started")
         #expect(await waitUntil { harness.controller.status == .thinking })
         agent.emit(.acting(title: "Open Safari"))
         #expect(await waitUntil { harness.controller.status == .acting })
@@ -178,8 +179,8 @@ struct AgentSessionTests {
         #expect(harness.hotkeys.activeCancelListeners == 0)
         await reachAgent(harness)
         _ = await waitUntil { harness.hud.lastMode == .reply("Opened Safari.") }
-        harness.clock.advance(by: .seconds(30))
-        #expect(await waitUntil { harness.hotkeys.activeCancelListeners == 0 }, "after the reply times out, Esc goes back to other apps")
+        let released = await harness.advanceClock(by: .seconds(30)) { harness.hotkeys.activeCancelListeners == 0 }
+        #expect(released, "after the reply times out, Esc goes back to other apps")
     }
 
     // MARK: Speaking
@@ -415,8 +416,7 @@ struct AgentSessionTests {
         #expect(await waitUntil { harness.hud.lastMode == .error(error) })
         #expect(harness.controller.lastError == error)
         #expect(harness.controller.status == .error)
-        harness.clock.advance(by: .seconds(8))
-        #expect(await waitUntil { harness.controller.status == .idle })
+        #expect(await harness.advanceClock(by: .seconds(8)) { harness.controller.status == .idle })
     }
 
     @Test("limits, refusals and timeouts are shown as replies")

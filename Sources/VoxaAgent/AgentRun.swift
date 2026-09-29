@@ -47,13 +47,39 @@ final class Run: @unchecked Sendable {
         onEvent?(event)
     }
 
+    /// What the model was shown in a picture (a screenshot of the user's window) stays with the command that asked for it. Kept
+    /// for a follow-up, it would be sent to the model again, at the cost of thousands of tokens each time, and would hold
+    /// whatever was on the screen for as long as the conversation lives. What the model *said* about it is kept.
+    static let pictureRemoved = "[A picture was shown here. Pictures aren't kept once the command that took them has ended.]"
+
+    static func withoutPictures(_ messages: [LLMMessage]) -> [LLMMessage] {
+        messages.map { message in
+            LLMMessage(
+                role: message.role,
+                content: message.content.map { block in
+                    guard case .toolResult(let id, let parts, let isError) = block,
+                        parts.contains(where: { if case .image = $0 { true } else { false } })
+                    else { return block }
+                    var kept: [ToolResultBlock] = []
+                    for part in parts {
+                        switch part {
+                        case .image: if kept.last != .text(pictureRemoved) { kept.append(.text(pictureRemoved)) }
+                        case .text: kept.append(part)
+                        }
+                    }
+                    return .toolResult(toolUseID: id, content: kept, isError: isError)
+                }
+            )
+        }
+    }
+
     /// What to remember. A finished command keeps its whole conversation. One that was cut short keeps only a plain note
     /// of what already happened, because its history may end in a tool call that has no result, which the API rejects.
     func committedMemory(for outcome: AgentRunResult.Outcome) -> ConversationMemory {
         var memory = base
         switch outcome {
         case .completed, .limitReached, .refused, .stoppedAfterDeclines:
-            memory.messages = messages
+            memory.messages = Self.withoutPictures(messages)
             memory.taint = taint
             memory.lastActivity = context.now
         case .cancelled, .timedOut, .failed:

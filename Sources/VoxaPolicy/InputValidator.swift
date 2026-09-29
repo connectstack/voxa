@@ -57,6 +57,9 @@ public enum InputValidator {
                     check(item, schema: itemSchema, path: path + ["[\(index)]"], into: &problems)
                 }
             }
+            if let minimum = schema["minItems"]?.intValue, items.count < minimum {
+                problems.append("\(name) needs at least \(minimum) item\(minimum == 1 ? "" : "s").")
+            }
             if let maximum = schema["maxItems"]?.intValue, items.count > maximum {
                 problems.append("\(name) can have at most \(maximum) items.")
             }

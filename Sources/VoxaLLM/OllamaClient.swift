@@ -146,10 +146,33 @@ private final class OllamaSession: LLMWireSession, @unchecked Sendable {
 
     var logDescription: String { "request to Ollama model \(request.model): \(request.messages.count) messages" }
 
+    /// What the model is told when it is sent a picture it can't see: an honest note, so it can say so instead of failing.
+    static let noVisionNote = "[A picture was taken, but this model can't see images. Tell the user that.]"
+
     func makeRequest() async throws -> URLRequest {
         guard !request.model.trimmingCharacters(in: .whitespaces).isEmpty else { throw LLMError.missingModel }
         let think = sendThink ? await thinkSetting() : nil
-        return try builder.urlRequest(for: request, think: think)
+        return try builder.urlRequest(for: await withoutUnusablePictures(request), think: think)
+    }
+
+    /// A model without vision would answer a picture with an error. When the server says it can't see, the pictures are left out
+    /// and replaced by a note; when it can't be asked, they are sent as they are.
+    private func withoutUnusablePictures(_ request: LLMRequest) async -> LLMRequest {
+        guard request.messages.contains(where: \.containsImages), let details = await modelDetails(),
+            !details.capabilities.contains("vision")
+        else { return request }
+        var edited = request
+        edited.messages = request.messages.map { $0.replacingImages(with: Self.noVisionNote) }
+        return edited
+    }
+
+    /// What the server says about the model, remembered for a few minutes.
+    private func modelDetails() async -> OllamaModelDetails? {
+        let key = "\(builder.baseURL.absoluteString)|\(request.model)"
+        if let cached = cache.details(for: key) { return cached }
+        guard let fetched = try? await discovery.details(of: request.model, at: builder.baseURL) else { return nil }
+        cache.store(fetched, for: key)
+        return fetched
     }
 
     func makeDecoder() -> any LLMStreamDecoder {
@@ -177,17 +200,7 @@ private final class OllamaSession: LLMWireSession, @unchecked Sendable {
     /// How to ask this model to think, given the user's setting. A quick setting turns thinking off where the model allows it,
     /// since a voice command shouldn't wait on a long chain of thought; otherwise the model's own default applies.
     private func thinkSetting() async -> OllamaThink? {
-        guard let effort = request.effort else { return nil }
-        let key = "\(builder.baseURL.absoluteString)|\(request.model)"
-        let details: OllamaModelDetails
-        if let cached = cache.details(for: key) {
-            details = cached
-        } else if let fetched = try? await discovery.details(of: request.model, at: builder.baseURL) {
-            cache.store(fetched, for: key)
-            details = fetched
-        } else {
-            return nil
-        }
+        guard let effort = request.effort, let details = await modelDetails() else { return nil }
 
         switch details.thinking {
         case .unsupported, .always:

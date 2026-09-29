@@ -52,6 +52,14 @@
 	<string>Voxa reads and adds reminders when you ask it to.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Voxa reads and adds reminders when you ask it to.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Voxa finds, moves and puts files in the Trash when you ask it to, and asks you first before moving or trashing anything.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Voxa finds, moves and puts files in the Trash when you ask it to, and asks you first before moving or trashing anything.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Voxa finds, moves and puts files in the Trash when you ask it to, and asks you first before moving or trashing anything.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Voxa finds, moves and puts files in the Trash when you ask it to, and asks you first before moving or trashing anything.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Voxa connects to an Ollama server on your network only if you choose one in Settings.</string>
 

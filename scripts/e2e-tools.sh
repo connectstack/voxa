@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# End-to-end check of the calendar, reminders, clipboard and screen-context tools, the permission gate, spoken replies and the
-# first-run walkthrough, through the real Debug app and the local mock model server.
+# End-to-end check of the calendar, reminders, clipboard and screen-context tools, the tools that read and drive other apps'
+# windows, take screenshots and work with files, the permission gate, spoken replies and the first-run walkthrough, through the
+# real Debug app and the local mock model server.
 #
 #   scripts/build.sh                 # build the Debug app first
 #   scripts/e2e-tools.sh             # then run this
 #
-# The tools run against made-up sample data (VOXA_DEBUG_SAMPLE_DATA), and permission answers are scripted
-# (VOXA_DEBUG_TOOL_PERMISSIONS), so nothing here touches a real calendar, a real clipboard or System Settings, and no system
-# prompt appears. One check does speak a short sentence aloud, to prove the voice works on this Mac.
+# The tools run against made-up sample data (VOXA_DEBUG_SAMPLE_DATA: a pretend Safari, a pretend disk), and permission answers are
+# scripted (VOXA_DEBUG_TOOL_PERMISSIONS), so nothing here touches a real calendar, clipboard, window, screen or file, or System
+# Settings, and no system prompt appears. One check does speak a short sentence aloud, to prove the voice works on this Mac.
 
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/e2e.sh"
 
 GRANTED="calendars=granted,reminders=granted"
+ALL="$GRANTED,accessibility=granted,screenRecording=granted"
 # One command per conversation: what a tool reads would otherwise make the next command ask, which is right, but not what is
 # being checked here.
 FRESH='"followUpWindowSeconds":0'
@@ -70,6 +72,95 @@ answer deny
 check "declined, the link is never opened" "$(! audit_has "$MARK" toolResult open_url ok && reply_has "didn't open" && echo 0 || echo 1)"
 
 # ---------------------------------------------------------------------------------------------------------------------------
+log "Other apps' windows, screenshots and files, against a pretend Safari and a pretend disk"
+settings ""
+launch --env VOXA_DEBUG_SAMPLE_DATA=1 --env "VOXA_DEBUG_TOOL_PERMISSIONS=$ALL"
+
+ask "ui inspect"
+check "looking at the window just runs, and finds its controls" "$(audit_has "$MARK" policyDecision ui_inspect allow && reply_has "controls" && echo 0 || echo 1)"
+
+ask "ui keys"
+check "pressing a shortcut, with nothing outside read yet, runs with a notice and no question" \
+    "$(audit_has "$MARK" policyDecision ui_press_keys notice && ! audit_has "$MARK" confirmation && reply_has "Pressed" && echo 0 || echo 1)"
+
+ask "ui quit"
+check "a shortcut that quits an app always asks" "$(audit_has "$MARK" policyDecision ui_press_keys confirm && echo 0 || echo 1)"
+answer deny
+check "declined, nothing is pressed" "$(! audit_has "$MARK" toolResult ui_press_keys ok && reply_has "didn't quit" && echo 0 || echo 1)"
+
+ask "ui click reload"
+check "a click after the window has been read asks, because what it read is outside content" "$(audit_has "$MARK" policyDecision ui_click confirm && echo 0 || echo 1)"
+answer allow
+check "once allowed, the button is pressed" "$(audit_has "$MARK" toolResult ui_click ok && reply_has "Clicked reload" && echo 0 || echo 1)"
+
+ask "ui click feedback"
+check "a button labelled Send Feedback asks, and says why" "$(audit_has "$MARK" policyDecision ui_click confirm && echo 0 || echo 1)"
+answer deny
+check "declined, it is not pressed" "$(! audit_has "$MARK" toolResult ui_click ok && reply_has "didn't" && echo 0 || echo 1)"
+
+ask "ui type search"
+check "typing after reading the window asks" "$(audit_has "$MARK" policyDecision ui_type confirm && echo 0 || echo 1)"
+answer allow
+check "once allowed, the text is typed" "$(audit_has "$MARK" toolResult ui_type ok && reply_has "Typed" && echo 0 || echo 1)"
+
+ask "ui password"
+check "typing into a password field is refused outright, with no question" \
+    "$(audit_has "$MARK" policyDecision ui_type deny && ! audit_has "$MARK" confirmation && reply_has "password field" && echo 0 || echo 1)"
+
+ask "shot window"
+check "a picture of one window runs with a notice" "$(audit_has "$MARK" policyDecision screenshot notice && reply_has "took a look" && echo 0 || echo 1)"
+ask "shot screen"
+check "a picture of the whole screen always asks" "$(audit_has "$MARK" policyDecision screenshot confirm && echo 0 || echo 1)"
+answer deny
+check "declined, no picture is taken" "$(! audit_has "$MARK" toolResult screenshot ok && reply_has "didn't look" && echo 0 || echo 1)"
+ask "shot click"
+check "a click at a point in a picture asks" "$(audit_has "$MARK" policyDecision ui_click confirm && echo 0 || echo 1)"
+answer allow
+check "once allowed, the click lands on the button in the picture" "$(audit_has "$MARK" toolResult ui_click ok && reply_has "Clicked" && echo 0 || echo 1)"
+
+ask "find invoices"
+check "searching for files just runs, and finds them" "$(audit_has "$MARK" policyDecision file_search allow && reply_has "april-invoice" && echo 0 || echo 1)"
+ask "reveal report"
+check "showing a file in Finder just runs" "$(audit_has "$MARK" policyDecision reveal_in_finder allow && reply_has "Showed" && echo 0 || echo 1)"
+ask "move report"
+check "moving a file always asks" "$(audit_has "$MARK" policyDecision file_move confirm && echo 0 || echo 1)"
+answer deny
+check "declined, the file stays where it is" "$(! audit_has "$MARK" toolResult file_move ok && reply_has "where it was" && echo 0 || echo 1)"
+ask "trash screenshots"
+check "trashing files always asks, after the search that found them" "$(audit_has "$MARK" policyDecision file_search allow && audit_has "$MARK" policyDecision file_trash confirm && echo 0 || echo 1)"
+answer allow
+check "once allowed, they go to the Trash" "$(audit_has "$MARK" toolResult file_trash ok && reply_has "Trash" && echo 0 || echo 1)"
+ask "trash ssh"
+check "a file in a hidden folder can never be trashed, and the user is not even asked" \
+    "$(audit_has "$MARK" policyDecision file_trash deny && ! audit_has "$MARK" confirmation && reply_has "can't touch" && echo 0 || echo 1)"
+
+check "every request the app made was a valid one" "$(requests_valid anthropic && echo 0 || echo 1)"
+
+# ---------------------------------------------------------------------------------------------------------------------------
+log "A web page and a file name with instructions hidden in them"
+launch --env VOXA_DEBUG_SAMPLE_DATA=hostile --env "VOXA_DEBUG_TOOL_PERMISSIONS=$ALL"
+ask "ui inject"
+check "the fooled model's request to open a link is stopped and put to the user" "$(audit_has "$MARK" policyDecision open_url confirm && echo 0 || echo 1)"
+answer deny
+check "declined, the link is never opened" "$(! audit_has "$MARK" toolResult open_url ok && reply_has "didn't open" && echo 0 || echo 1)"
+ask "file inject"
+check "so is one prompted by a file name" "$(audit_has "$MARK" policyDecision open_url confirm && echo 0 || echo 1)"
+answer deny
+check "and declined the same way" "$(! audit_has "$MARK" toolResult open_url ok && reply_has "didn't open" && echo 0 || echo 1)"
+
+# ---------------------------------------------------------------------------------------------------------------------------
+log "The permission gate for windows and the screen"
+launch --env VOXA_DEBUG_SAMPLE_DATA=1 --env "VOXA_DEBUG_TOOL_PERMISSIONS=$GRANTED,accessibility=denied,screenRecording=denied"
+ask "ui inspect"
+check "without Accessibility the command ends with an error, and nothing is read" \
+    "$(audit_has "$MARK" permission ui_inspect denied && audit_has "$MARK" failure && ! audit_has "$MARK" toolResult ui_inspect && echo 0 || echo 1)"
+ask "shot window"
+check "without Screen Recording no picture is taken" \
+    "$(audit_has "$MARK" permission screenshot denied && audit_has "$MARK" failure && ! audit_has "$MARK" toolResult screenshot && echo 0 || echo 1)"
+ask "find invoices"
+check "the file tools need no permission of their own" "$(audit_has "$MARK" toolResult file_search ok && echo 0 || echo 1)"
+
+# ---------------------------------------------------------------------------------------------------------------------------
 log "The permission gate"
 launch --env VOXA_DEBUG_SAMPLE_DATA=1 --env "VOXA_DEBUG_TOOL_PERMISSIONS=calendars=denied,reminders=granted"
 ask "calendar today"
@@ -88,7 +179,7 @@ log "Spoken replies"
 write_settings '{"localeIdentifier":"en_US","onboardingCompleted":true,"speakReplies":true,"followUpWindowSeconds":0}'
 launch
 printf 'Testing one two.' >"$WORK/say.txt"
-notifyutil -p com.rohitsainier.voxa.debug.say
+hook say
 check "the voice starts speaking" "$(wait_for 5 report_has "speaking=true" && echo 0 || echo 1)"
 check "and finishes on its own" "$(wait_for 15 report_has "speaking=false" && echo 0 || echo 1)"
 
@@ -97,7 +188,7 @@ check "and finishes on its own" "$(wait_for 15 report_has "speaking=false" && ec
 launch --env VOXA_DEBUG_SAMPLE_DATA=1 --env "VOXA_DEBUG_TOOL_PERMISSIONS=$GRANTED"
 ask "add lunch"
 check "the reply is spoken as well as shown" "$(wait_for 5 report_has "speaking=true" && echo 0 || echo 1)"
-notifyutil -p com.rohitsainier.voxa.debug.key.escape
+hook key.escape
 check "Esc cuts the speech off at once" "$(wait_for 3 report_has "speaking=false" && echo 0 || echo 1)"
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -105,22 +196,22 @@ log "The first-run walkthrough"
 write_settings '{"localeIdentifier":"en_US","onboardingCompleted":false,"speakReplies":false}'
 launch
 check "a first run opens the walkthrough by itself" "$(report_has "welcome=true" && echo 0 || echo 1)"
-notifyutil -p com.rohitsainier.voxa.debug.onboarding.close
+hook onboarding.close
 check "and it can be closed" "$(wait_for 3 report_has "welcome=false" && echo 0 || echo 1)"
 
 write_settings '{"localeIdentifier":"en_US","onboardingCompleted":true,"speakReplies":false}'
 launch
 check "once finished, the walkthrough does not open by itself again" "$(report_has "welcome=false" && echo 0 || echo 1)"
-notifyutil -p com.rohitsainier.voxa.debug.onboarding
+hook onboarding
 check "but it can be opened again on request" "$(wait_for 3 report_has "welcome=true" && echo 0 || echo 1)"
-notifyutil -p com.rohitsainier.voxa.debug.onboarding.close
+hook onboarding.close
 wait_for 3 report_has "welcome=false" || true
-notifyutil -p com.rohitsainier.voxa.debug.button.welcomeGuide
+hook button.welcomeGuide
 check "and so can it from the button in Settings" "$(wait_for 3 report_has "welcome=true" && echo 0 || echo 1)"
 
 log "The Settings tabs"
 for tab in general model tools permissions safety history; do
-    notifyutil -p "com.rohitsainier.voxa.debug.settings.tab.$tab"
+    hook "settings.tab.$tab"
     check "Settings opens on the $tab tab" "$(wait_for 3 report_has "settingsTab=$tab" && echo 0 || echo 1)"
 done
 

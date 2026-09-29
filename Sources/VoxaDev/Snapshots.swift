@@ -214,6 +214,7 @@ enum SamplePrompts {
             pages.append(("settings-\(tab.rawValue)", AnyView(EmptyView()), SettingsView.contentSize))
         }
     }
+    pages.append(("whisper-models", AnyView(EmptyView()), CGSize(width: SettingsView.contentSize.width, height: 430)))
     for step in 0..<WelcomePreview.stepCount {
         pages.append(
             (
@@ -228,7 +229,17 @@ enum SamplePrompts {
     ] {
         for page in pages {
             let view: AnyView
-            if page.name.hasPrefix("settings-") {
+            if page.name == "whisper-models" {
+                // One model of each kind of state, and a language the chosen (English-only) model doesn't cover.
+                store.current.whisperModel = "base.en"
+                store.current.localeIdentifier = "fr_FR"
+                let states: [String: WhisperModelsModel.State] = [
+                    "tiny": .notInstalled, "base.en": .ready, "base": .downloading(fraction: 0.42), "small.en": .preparing,
+                    "small": .failed("The internet connection appears to be offline."),
+                ]
+                view = AnyView(WhisperModelsPreview(store: store, models: .preview(states)))
+                store.current.localeIdentifier = AppSettings.systemLocaleIdentifier
+            } else if page.name.hasPrefix("settings-") {
                 // The provider is part of the page, and the page part of the name.
                 let parts = page.name.split(separator: "-").map(String.init)
                 var tab = SettingsView.Tab(rawValue: parts[1]) ?? .general

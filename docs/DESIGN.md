@@ -27,7 +27,10 @@ voxa/
 │  ├─ VoxaCore/          shared kernel: AudioChunk, UserFacingError, L10n, Log, AppSettings, PermissionKind, HotkeyService,
 │  │                     JSONValue, Schema, AgentTool/ToolResult/RiskLevel, ConfirmationPrompt, AuditEntry, JSONLAuditLog
 │  ├─ VoxaAudio/         AudioCapturing, MicrophoneCapture (AVAudioEngine), SpeechFormatConverter, LevelMeter
-│  ├─ VoxaSpeech/        SpeechRecognizer; SFSpeechRecognizer + SpeechAnalyzer engines; [M4] WhisperKit
+│  ├─ VoxaSpeech/        SpeechRecognizer; SFSpeechRecognizer + SpeechAnalyzer engines; [M4] WhisperRecognizer (the engine-agnostic
+│  │                     streaming around any Whisper), WhisperModelsModel (what Settings' model list drives)
+│  ├─ VoxaWhisper/ [M4]  the one module that carries WhisperKit: model storage and "ready" markers, download + prepare, loading and
+│  │                     idle unloading
 │  ├─ VoxaPermissions/   PermissionsProviding, SystemPermissionsManager (asks for every kind), PermissionsModel (rows, polling)
 │  ├─ VoxaVoice/  [M3]   text to speech: SpeechSynthesizing, AVFoundationSpeaker, voice choice, text made ready to be said
 │  ├─ VoxaHUD/           non-activating NSPanel + SwiftUI HUD: listening, thinking, acting, confirmation card, reply
@@ -35,15 +38,18 @@ voxa/
 │  │                     window controllers for Settings and the first-run walkthrough, Ollama status
 │  ├─ VoxaLLM/    [M2]   Model clients over URLSession, one per provider (Claude, OpenAI, Ollama) behind RoutingLLMClient;
 │  │                     shared streaming engine (SSE / NDJSON, retries, cancellation), request builders, key storage
-│  ├─ VoxaPolicy/ [M2]   PolicyEngine, untrusted-data envelope, AppleScript and URL analyzers, voice yes/no parser
-│  ├─ VoxaTools/  [M2-3] open_app, open_url, list_shortcuts, run_shortcut, run_applescript; calendar_* (4), reminders_* (2),
-│  │                     clipboard_* (2), get_frontmost_context; EventKit, pasteboard and Accessibility behind protocols
+│  ├─ VoxaPolicy/ [M2-4] PolicyEngine, untrusted-data envelope, AppleScript and URL analyzers, voice yes/no parser; [M4] AppSafety
+│  │                     (apps that are off limits), UILabelRisk (labels that send or delete), FilePathPolicy (which files may change)
+│  ├─ VoxaTools/  [M2-4] open_app, open_url, list_shortcuts, run_shortcut, run_applescript; calendar_* (4), reminders_* (2),
+│  │                     clipboard_* (2), get_frontmost_context; [M4] ui_inspect, ui_click, ui_type, ui_press_keys, screenshot,
+│  │                     file_search, reveal_in_finder, file_move, file_trash; EventKit, pasteboard, Accessibility, CGEvent,
+│  │                     ScreenCaptureKit and the file system behind protocols, with a pretend desktop and disk for tests and demos
 │  ├─ VoxaAgent/  [M2]   AgentLoop, AgentService, ToolRegistry, ConversationMemory, system prompt + runtime context
 │  ├─ VoxaApp/           composition root, VoiceSessionController, ConfirmationCoordinator, hotkey service, menu bar
 │  ├─ VoxaDev/           developer CLI: transcribe, speech-status, hud-snapshots, system-prompt, ask, chat, ollama
 │  └─ VoxaTestSupport/   ManualClock, fakes, ScriptedLLM, StubTool, MockHTTPTransport, SSE builders, TestSignal
 ├─ Tests/                        one test target per module
-└─ scripts/                      build, sign, notarize, icon, window inspection, mock-llm-server.py, e2e-providers.sh
+└─ scripts/                      build, sign, notarize, icon, window inspection, mock-llm-server.py, e2e-providers.sh, e2e-tools.sh
 ```
 
 ```mermaid
@@ -64,6 +70,10 @@ graph TD
     Perms --> Core
     HUD --> Core
     Settings --> Core
+    App --> Whisper[VoxaWhisper]
+    Whisper --> Speech
+    Whisper --> Core
+    Whisper -. WhisperKit .-> WK[(WhisperKit)]
     Settings --> Speech
     Settings --> LLM
     LLM --> Core
@@ -304,6 +314,96 @@ each client = StreamingEngine (retries, backoff, cancellation, .restarted) + a w
 - The walkthrough (welcome, permissions, model, ready) opens once on a first run and never traps the user: every step can be skipped,
   and the last says plainly what is still missing. Its window is fixed-size, like Settings, for the same reason.
 
+### Driving other apps (M4)
+
+- **Four tools, one shape.** `ui_inspect` (read-only) lists the front window or its menu bar as numbered elements; `ui_click`,
+  `ui_type` and `ui_press_keys` act. They all work on **the front app only**: to use another, `open_app` it first. That keeps
+  what the card says ("Click “Save” in TextEdit") the same as what happens.
+- **References, and checking before acting.** A listing hands out `e1, e2…` valid until the next listing. Before acting, the automation
+  looks again: the same app must be in front (by process, not name), the element must still exist with the same label, and a
+  click that has to be made with the mouse (the control has no press action) must find the app's own window on top at that
+  point (from the window server), so it can't land on something that slid in front. For a click at a point in a *screenshot*, the
+  window must not have moved, and what is at that spot (re-read through the Accessibility API) must be what the card described.
+- **The card is built from a description the code made.** `assess` calls `describe(target)`, which answers from the listing (or
+  reads the point live) and never from what the model wrote. A label that looks consequential (`UILabelRisk`: send, delete,
+  buy, allow, quit…, but not "Don't Allow") raises the click to sensitive; so do a line break in typed text, Return in a chat or
+  mail app, ⌘Q and other shortcuts with a system-wide meaning (`KeyChord.consequence`), and Return when the window's default
+  button has such a label (found through the Accessibility API and refused with "click it instead", which is asked).
+- **App restrictions (`AppSafety`).** Terminals, script editors, password managers and the admin-password prompt are refused for
+  reading and driving; System Settings, Disk Utility and Activity Monitor make everything sensitive. A hand-kept bundle-ID list,
+  described in the code as a second line of defence. The obvious gap is any app not on it; taint and confirmation are what cover that.
+- **Never a password field.** Reading one gives no value; typing is refused whether it is named by reference or has the focus;
+  plain characters are refused while one has the focus.
+- **Results never repeat app text.** "Pressed e12 (button) in Safari" names the reference and the role, not the label.
+- **Seams.** The Accessibility API, the window list, synthetic input and the front-app tracker are protocols; `SampleDesktop` is a
+  small pretend desktop (a Safari window, its menu bar, a password field, a hostile page on request) that implements all of them, and
+  the real `AccessibilityAutomation` runs against it in tests *and* in the app's sample-data mode. What is left untested is the
+  thin layer under the seams (`SystemAccessibilityTree`, `CGEventInputSynthesizer`): they are covered for how events and values are
+  built, that a missing permission gives empty answers and never a crash, and by the manual checklist for the rest. CGEvents are
+  built from a private event source, so the state of the real keyboard isn't mixed in. Layout-aware key lookup uses the
+  ASCII-capable layout macOS itself matches shortcuts against.
+- **Reading is bounded**: depth, node count and a time budget, because a web page can hold thousands of elements and an app can be slow.
+
+### Screenshots (M4)
+
+- ScreenCaptureKit; the window is captured *as itself* (`desktopIndependentWindow`), so what is on top of it or beside it isn't in
+  the picture; the whole-display capture excludes Voxa's own windows. The picture is scaled to at most 1568 px on its longest side and
+  encoded as PNG, or JPEG if that is too large; nothing is written to disk.
+- **Policy.** One window: reversible (a notice; asks after outside content or under strict settings). The whole screen: sensitive
+  (always asks). Password managers and the like are never captured, and the front-app rule applies to the whole-screen version too.
+  The result is untrusted (text in a picture is data) and a screenshot taints the conversation like anything else read from outside.
+- **Pictures don't outlive their command.** When a command ends, its pictures are replaced by a sentence in the remembered
+  history, so they aren't sent to the model again (thousands of tokens each, and a copy of the user's screen) on a follow-up.
+- **Clicking into a picture.** Each screenshot is registered (`s1`, `s2`…) with the area it covers, so `ui_click(screenshot, x, y)` maps
+  a pixel back to a point on the screen.
+- **Ollama models without vision** are told in words that a picture was taken and can't be seen, rather than sent bytes that would
+  fail the request.
+
+### Files (M4)
+
+- `file_search` looks by *name* (words that must all appear), in the home folder or one folder in it. Spotlight (`MDQuery`) is
+  asked first; if it is unavailable, a bounded walk through the folders answers instead. The search words are reduced to letters,
+  digits and a few name characters before they reach the query, so nothing the model wrote can be query syntax. Hidden items, the
+  Library and the inside of apps and libraries are left out. Names come back as untrusted data.
+- `file_move` and `file_trash` are always sensitive. `FilePathPolicy` first makes the path canonical (`~` expanded, `..` removed,
+  parent folders followed through links, the last part kept as itself so a link is moved as a link), then applies plain rules:
+  inside the home folder or on an external drive; not hidden or inside a hidden folder; not the Library; not one of the standard
+  folders themselves; not inside a package (app, photo library…); not the home folder or a whole drive. The destination is
+  followed through links before it is judged, and the same check runs again when the action is carried out, since the disk can
+  change while the card is up.
+- **Nothing is replaced and nothing is deleted.** A name already taken stops the move (`moveItem` refuses too); the only way a file
+  goes is `trashItem`. A lint rule (`no_file_deletion_in_tools`) fails the build if anything in `VoxaTools` calls `removeItem`,
+  `unlink` or `rmdir`. Results never repeat a file name. macOS asks separately for access to Documents, Desktop, Downloads and
+  so on the first time Voxa touches them; a refusal comes back as one sentence saying where to allow it.
+- The real disk is tested on throwaway folders (links, packages, permissions, name clashes) but the real `trashItem` isn't called in
+  tests, because it would put something in the user's own Trash.
+
+### Whisper (M4)
+
+- **Why a module of its own.** WhisperKit is a large dependency that most of the app has no business seeing. Only `VoxaWhisper` imports
+  it; everything else works with two small protocols in `VoxaSpeech` (`WhisperTranscribing`, `WhisperTranscriberProviding`), so the
+  streaming logic and the settings are tested without a model.
+- **Streaming from a non-streaming model.** Whisper transcribes finished audio, so the recognizer re-transcribes everything heard so
+  far after each second of new audio (a revisable guess, as the `SpeechRecognizer` contract wants) and once more for the final text.
+  A spoken command is seconds long, so this is cheap; past 28 s the guesses stop and only the final covers everything. Whole
+  recordings that are near silence are never sent (Whisper makes text up for silence), and the sound annotations it emits
+  (`[BLANK_AUDIO]`, `(music)`, notes) are stripped.
+- **Nothing is downloaded behind your back.** Loading only ever uses a model that is *ready*: downloaded, prepared for this Mac
+  (Core ML compiles it for the chip, and the small tokenizer file is fetched, in one "prepare" step) and recorded in a marker. The
+  download happens only from the button in Settings, resumable, cancellable, one at a time. Models live in Application Support,
+  not Documents (WhisperKit's default, which would ask macOS for access).
+- **Memory.** A loaded model is kept while it is in use and let go after ten idle minutes; launching with Whisper chosen loads it in
+  the background so the first command doesn't wait.
+- **Not verified here:** a real transcription. Doing so needs a model download (about 150 MB for Base), which nobody has approved;
+  everything around it is tested, and `voxa-dev transcribe clip.aiff --engine whisper --model base.en --download` is the one command
+  that does it.
+
+### Test hooks that don't reach other copies (M4)
+
+Debug builds react to Darwin notifications (`notifyutil -p com.rohitsainier.voxa.debug.…`), which are system-wide. A test run
+sets `VOXA_DEBUG_HOOK_SUFFIX`, which is added to every name, so another Voxa on the same Mac (one being used, or a build from
+before this existed) neither hears them nor sends them; the scripts also stop only the copy they started.
+
 ## 4. Agent system prompt
 
 `Sources/VoxaAgent/Resources/AgentSystemPrompt.md` (print it with `swift run voxa-dev system-prompt`). It is loaded at
@@ -329,6 +429,13 @@ runtime, filled in with the step cap, and kept **static**. Tests pin the safety 
 | A13 | A refused permission ends the command instead of returning an error to the model. | The error carries a button that fixes it; a sentence can't. The cost is that other steps of the same command don't run. |
 | A14 | `clipboard_read` is reversible (a notice), not read-only. | It sends what you copied to a model provider, which deserves to be visible. |
 | A15 | The walkthrough opens once, on a first run, and can be reopened from Settings. Existing users see it once after updating. | It is also the place that checks everything needed is in place. |
+| A16 | The UI tools act on the front app only, through references that expire at the next listing, and check the world again at the moment of acting. | What the card says must be what happens; the world changes while a card is up. |
+| A17 | Terminals, script editors, password managers and the admin prompt are off limits for UI tools and screenshots; a few system apps always ask. | Typing into a terminal would run commands and get around the no-shell rule; secrets shouldn't reach a model. A short list is a second line of defence, not the first. |
+| A18 | A screenshot covers one window unless the whole screen is asked for (which always asks), and is dropped from the history when the command ends. | A picture can't be sanitized and can show anything; it is the most private thing Voxa can send. |
+| A19 | File tools use the Trash and never delete or replace; only the home folder and external drives, minus hidden items, the Library and packages. Enforced by a lint rule as well as by the tools. | A voice mishearing must never cost a file that can't be recovered. |
+| A20 | WhisperKit lives in its own module; models are downloaded only on request; a model is usable only once a "ready" marker says it was prepared. | Keep a big dependency contained, never surprise anyone with a download, never mistake a half-finished download for a model. |
+| A21 | Screenshots and UI listings carry no text of Voxa's own beyond a reference and a role; tool results never repeat labels or file names. | Text from outside must reach the model only inside the untrusted envelope. |
+| A22 | End-to-end scripts use test hooks with a private suffix and stop only their own copy. | They must be safe to run while the user is using Voxa. |
 
 ### Lesson: never let SwiftUI size a window through Auto Layout on macOS 26
 
@@ -396,6 +503,12 @@ real catalog. Any tool that reads the real system should have at least one test 
 | R8 | The real APIs' behavior (streaming edge cases, model-specific parameters) can't be exercised without a key. | Request shapes are pinned against the documented rules in tests and a validating mock server; the first real run is on the manual QA list. **OpenAI in particular has not yet been run against the live API**; Ollama has, with a model that can't use tools (which exercises discovery, streaming and its errors), but not yet with a tool-capable one. |
 | R9 | AppleScript is a general-purpose language; no static check proves a script safe. | Always sensitive; the user reads the whole script; a reader that matches AppleScript's own parsing refuses the known routes to a shell; out of process with a timeout. |
 | R10 | EventKit (calendar, reminders) and Accessibility behavior can't be exercised without the user's grants, and an ad-hoc build loses them on every rebuild. | The tools are tested against in-memory doubles and the real classes for the no-access path; the app runs end to end on sample data with scripted permission answers; the first real run is on the manual QA list. |
+| R11 | UI automation acts as the user. A model that is fooled, or a page that lies about what a button does, can click the wrong thing. | Everything read from a window is untrusted and taints; acting after that asks; consequential labels and shortcuts always ask; the world is re-checked before acting; the card comes from the tool's description; app restrictions; never a password field. Residual: a control with a harmless label that does something else, in an app not on the list. |
+| R12 | Some apps expose little through Accessibility (canvases, Chromium and Electron apps until their accessibility is switched on). | `ui_inspect` says when it found nothing usable; the model can fall back to a screenshot and a click at a point, which asks. Voxa does not switch on other apps' accessibility flags. |
+| R13 | Synthetic input lands in whatever has the keyboard focus, and macOS drops it silently without Accessibility. | The permission gate runs first; the app in front is checked before every action; the window under a mouse click must belong to that app. |
+| R14 | Real screen capture, real synthetic input and the real Accessibility tree can't be exercised without the user's grants. | Logic tested against a pretend desktop; the real capture was run once on a window of the test's own (colours and coordinates checked); the rest is on the manual QA list. |
+| R15 | Moving files can lose work if the path is wrong or the disk changes under the card. | Canonical paths and plain rules; never replaces or deletes; the plan is made again when the action runs; results say how far it got. |
+| R16 | WhisperKit adds a large dependency, needs a model that has to be downloaded, and its accuracy on short commands varies with the model. | Contained in one module; downloads only on request with sizes shown; Apple's engines remain the default; silence is never sent to it. A real transcription hasn't been run (it needs the download). |
 
 ## 7. Milestones
 
@@ -404,5 +517,5 @@ real catalog. Any tool that reads the real system should have at least one test 
 | M1 | Menu-bar shell, hotkey, audio capture, Apple STT, HUD with live transcript | done |
 | M2 | LLMClient, agent loop, open_app / open_url / run_shortcut / run_applescript, policy engine, confirmation HUD | done |
 | M3 | PermissionsManager + onboarding, calendar / reminders / clipboard / context tools, TTS, full settings, audit viewer | done |
-| M4 | Accessibility UI tools, screenshot + vision fallback, WhisperKit engine | next |
-| M5 | Hardening, tests, signing and notarization scripts, README, DMG | |
+| M4 | Accessibility UI tools, screenshot + vision fallback, file tools, WhisperKit engine | done |
+| M5 | Hardening, tests, signing and notarization scripts, README, DMG | next |

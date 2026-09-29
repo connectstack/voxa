@@ -108,3 +108,17 @@ custom_rules:
       then requests a constraints update, and AppKit throws (this crashed Settings). Use `sizingOptions = []` and size
       the window explicitly, e.g. from a preference callback; see HUDView.init.
     severity: error
+
+  no_file_deletion_in_tools:
+    name: "No outright file deletion in the tools"
+    included: "Sources/VoxaTools/.*\\.swift"
+    regex: '\.removeItem\s*\(|\bunlink\s*\(|\brmdir\s*\('
+    excluded_match_kinds:
+      - comment
+      - comment.mark
+      - doccomment
+      - doccomment.field
+    message: >-
+      Voxa never deletes a file outright: the only way its tools get rid of one is FileManager.trashItem, which moves it to
+      the Trash, where the person can put it back. Deleting belongs to the person, or to the Trash being emptied.
+    severity: error

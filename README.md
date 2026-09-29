@@ -5,11 +5,12 @@ an LLM with tool calling, then shows and speaks the result. It lives in the menu
 key, and transcribes your voice on the Mac. The model can be Claude, OpenAI's GPT, or a model that runs on your own Mac
 through Ollama.
 
-> **Status: milestone 3 of 5.** Hold the key, speak, and Voxa carries the command out with an LLM and tools for apps and
-> links, Shortcuts and AppleScript, your calendar and reminders, the clipboard and the app in front, asking your permission
-> for anything that isn't safe, and answering aloud. A welcome guide sets up permissions and the model on first launch, and
-> Settings has a switch for every tool, a Permissions page and the history of what Voxa did. On-screen control (clicking and
-> typing in other apps), screenshots and the optional Whisper engine arrive in later milestones. See [Roadmap](#roadmap).
+> **Status: milestone 4 of 5.** Hold the key, speak, and Voxa carries the command out with an LLM and tools for apps and
+> links, Shortcuts and AppleScript, your calendar and reminders, the clipboard, **other apps' windows (reading, clicking,
+> typing, shortcuts), screenshots and your files**, asking your permission for anything that isn't safe, and answering aloud.
+> **Whisper** is available as a speech engine that runs on your Mac. A welcome guide sets up permissions and the model on
+> first launch, and Settings has a switch for every tool, a Permissions page and the history of what Voxa did. What is left
+> is hardening, signing and notarization (milestone 5). See [Roadmap](#roadmap).
 
 ## Requirements
 
@@ -66,6 +67,30 @@ is identical for all three, so the safety rules don't depend on which one you us
   instructions and tool list. Raise it in Settings if you use long clipboard or file contents later on.
 - Try a key or a model without the app: `voxa-dev chat "say hello" --provider openai` (also `--provider ollama --model qwen3:8b`).
 
+## Speech engines
+
+**Settings → General → Speech recognition** offers three engines, all of which run on your Mac:
+
+| Engine | What it is |
+|--------|------------|
+| Automatic | Apple's newest engine when its language model is installed, otherwise the classic recognizer |
+| Classic | `SFSpeechRecognizer`, forced on-device |
+| **Whisper** | OpenAI's Whisper, run through Core ML ([WhisperKit](https://github.com/argmaxinc/WhisperKit)). It needs a model, which you download once |
+
+Choosing Whisper shows a list of models with their sizes: Tiny (about 80 MB, all languages), Base (about 150 MB, English or all
+languages) and Small (about 490 MB, English or all languages). **Nothing is downloaded until you press Download.** The models
+come from Hugging Face (`argmaxinc/whisperkit-coreml`); after the download Voxa prepares the model for your Mac's chip, which
+takes a minute the first time, and from then on Whisper works offline. Models are kept in
+`~/Library/Application Support/Voxa/Models/whisper` and **Remove** deletes one. Base (English) is a good start for English:
+quick enough for a spoken command and much better than Tiny at names and numbers; the multilingual ones follow the recognition
+language chosen above them.
+
+While you hold the key Whisper shows a live guess about once a second (it re-reads everything heard so far), and the final text
+when you let go. Silence and noise are never sent to it, and the sound annotations it makes up (`[BLANK_AUDIO]`, `(music)`) are
+removed. It needs no Speech Recognition permission. If the model you chose isn't on the Mac, the command says so, with a button
+that opens Settings. Try it without the app: `swift run voxa-dev transcribe clip.aiff --engine whisper --model base.en --download`
+(the `--download` is what fetches the model).
+
 ## What Voxa can do
 
 Every tool has a switch in **Settings → Tools**; a tool that is off is hidden from the model and refused if called anyway.
@@ -82,6 +107,11 @@ Every tool has a switch in **Settings → Tools**; a tool that is off is hidden 
 | Read the clipboard | Reads the text you copied | Tells you; untrusted; **never** something a password manager marked secret |
 | Copy to the clipboard | Puts text there for you to paste | Tells you |
 | See what's in front | The front app, and with Accessibility its window title and your selection | Runs; title and selection are untrusted |
+| Look at an app's window | Lists the buttons, fields and menu items of the front app (or its menu bar), each with a short reference | Runs; the list is untrusted data; needs Accessibility |
+| Click, type and press keys in other apps | Presses a listed control (or a point in a screenshot), types where the cursor is, presses shortcuts such as ⌘S | Tells you; **asks** once anything has been read from outside; **always asks** for a control that sends, deletes or buys, a quit or log-out shortcut, or text with a line break; **never** in a password field, a terminal, or a password manager |
+| Look at the screen | A picture of the front window (only if you ask for it, the whole screen) for the model to read, as a last resort | Tells you; the whole screen **always asks**; needs Screen Recording; the picture isn't kept after the command |
+| Find files, show in Finder | Searches file names in your home folder; shows one in a Finder window | Runs; the names are untrusted data |
+| Move files, move to the Trash | Moves files into a folder, or renames one; puts files in the Trash | **Always asks**; never replaces a file, never deletes one, and refuses hidden folders, your Library, the standard folders themselves, the inside of apps, and anything outside your home folder and external drives |
 
 ## Using it
 
@@ -102,8 +132,8 @@ The HUD never steals focus from the app you're working in. Change the shortcut o
 ## Project layout
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the full design. In short: all logic is a Swift package of small modules
-(`VoxaCore`, `VoxaAudio`, `VoxaSpeech`, `VoxaPermissions`, `VoxaHUD`, `VoxaSettings`, `VoxaLLM`, `VoxaPolicy`, `VoxaTools`,
-`VoxaAgent`, `VoxaApp`); the Xcode project only wraps `VoxaApp` in an app bundle with the Info.plist, entitlements and signing.
+(`VoxaCore`, `VoxaAudio`, `VoxaSpeech`, `VoxaWhisper`, `VoxaPermissions`, `VoxaHUD`, `VoxaSettings`, `VoxaLLM`, `VoxaPolicy`,
+`VoxaTools`, `VoxaAgent`, `VoxaApp`); the Xcode project only wraps `VoxaApp` in an app bundle with the Info.plist, entitlements and signing.
 
 **From key press to recognized text**
 
@@ -173,9 +203,10 @@ sequenceDiagram
 | Microphone | Hearing your command | First push-to-talk, or from the welcome guide |
 | Speech Recognition | Apple's classic on-device recognizer (not needed by the newer engine) | First push-to-talk, only if that engine runs |
 | Calendars, Reminders | The calendar and reminders tools | The first time a command needs one, or ahead of time from Settings → Permissions |
-| Accessibility | The front window's title and your selected text (`get_frontmost_context`) | Only from the welcome guide or Settings → Permissions, never in the middle of a command |
+| Accessibility | Reading the front window (title, selection, its controls) and clicking, typing and pressing keys in it | When a command needs it (macOS sends you to System Settings to switch it on), or ahead of time from the welcome guide or Settings → Permissions |
 | Automation | `run_applescript` controlling another app | The first time a script talks to that app (macOS asks per app) |
-| Screen Recording | Looking at the screen (milestone 4) | Not used yet |
+| Screen Recording | The `screenshot` tool | When a command needs it, or ahead of time from Settings → Permissions |
+| Files and Folders | Moving or trashing files in Documents, Desktop, Downloads and similar | macOS asks the first time Voxa touches each of them; Voxa has no switch of its own for it |
 
 Voxa asks macOS at the moment a tool needs a permission, and the command's clock stops while the prompt is up. If you have said
 no, the command ends with a message and a button that opens the right System Settings pane, rather than the model
@@ -193,11 +224,11 @@ exhaustively tested. The rules, all in force in this milestone:
 
 - **Push-to-talk only.** The microphone is open only while the key is held; macOS shows its orange indicator meanwhile. A
   spoken *yes* also needs the hold, so audio from a video or another voice can't approve anything.
-- **Only your spoken command is an instruction.** Script output (and later the screen, clipboard, files, web pages) is *data*:
+- **Only your spoken command is an instruction.** Script output, the screen, another app's controls, the clipboard, file names and web pages are *data*:
   it reaches the model wrapped in a random-boundary envelope, stripped of invisible characters, and can't close its own
   envelope. The system prompt tells the model to treat it as data.
 - **Three risk tiers, decided by code, not by the model.** Read-only actions run; reversible ones run with a notice;
-  sensitive ones (running scripts and Shortcuts, later deleting, sending, moving files) **always** ask. Risk only goes
+  sensitive ones (running scripts and Shortcuts, moving or trashing files, a button that sends or deletes, a quit shortcut) **always** ask. Risk only goes
   *up*: the highest of what the tool says, what the policy says about that tool, and what the call turns out to be. The
   model can't pass a "risk" or "confirmed" argument; the tool schemas forbid extra arguments and every call is validated
   against them.
@@ -221,6 +252,23 @@ exhaustively tested. The rules, all in force in this milestone:
   data, and once it has, even reversible actions ask (an invitation from a stranger can carry an instruction). The clipboard tool
   honors the convention password managers use and never returns something marked secret. A tool's permission is checked *before*
   the tool describes what it will do, so nothing reads your calendar without access.
+- **Driving other apps is checked at the moment it happens.** A reference from a listing only works while the same app is still
+  in front and the control is still there with the same name; a click at a point in a screenshot only works if the window hasn't
+  moved and what is at that spot is what you were asked about. Otherwise nothing is done and the model is told to look again.
+  A control whose label says *Send*, *Delete*, *Buy*, *Allow* and the like always asks, as does Return when the window's default
+  button looks like one, a line break in typed text (which sends in many apps), and shortcuts such as ⌘Q. Results say *what was
+  done* in Voxa's own words and never repeat text from the app.
+- **Some apps are off limits.** Voxa neither reads nor drives terminals (typing there would run commands, which would get around
+  the no-shell rule), script editors, password managers, Keychain Access, or the windows macOS uses to ask for your password;
+  System Settings, Disk Utility and Activity Monitor are allowed but everything in them asks. It never types into a password
+  field, and never reads one. This is a short hand-kept list, a second line of defence: it isn't the reason anything else is safe.
+- **A picture is the most private thing sent.** The screenshot tool needs Screen Recording; it captures one window (not what is
+  around it) unless the whole screen is really needed, which always asks; it skips Voxa's own windows; it is scaled down; and
+  once the command is over the picture is dropped from the conversation, so it isn't sent to the model again on a follow-up.
+- **Files: the Trash, never deletion.** Paths are made absolute and followed through links before they are judged. Only your own
+  files can be moved or trashed (your home folder and external drives, minus hidden items, the Library, the standard folders
+  themselves and the inside of apps and photo libraries). Nothing is ever replaced or deleted: the only way a file goes is
+  `trashItem`, and a lint rule fails the build if the tools ever call a deleting function. Results never repeat a file name.
 - **Secrets.** Each API key lives in the Keychain only (one entry per provider, this device only, never synced). Logs never
   contain keys, transcripts or tool payloads at the default level. A key is only ever sent over `https` (or to this Mac, for
   a local test server): a server address in Settings that isn't, silently falls back to the provider's own, so a bad setting
@@ -233,11 +281,15 @@ exhaustively tested. The rules, all in force in this milestone:
 ## Development
 
 ```bash
-make test         # unit tests (808 of them, ~10 s: includes real-window tests, a real osascript and a real speech voice)
+make test         # unit tests (1,069 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
 make lint         # SwiftLint
 make format       # SwiftFormat
 make snapshots    # render the HUD in every state, light and dark, to build/snapshots
 ```
+
+A few suites drive real windows (the Accessibility, window-list and screenshot code, each on a window of the test's own, so
+nothing of yours is ever read or clicked). They need the display awake, and the screen-capture ones also need Screen Recording
+allowed for whatever runs the tests (Terminal, Xcode); otherwise they are skipped, not failed.
 
 ### Developer tools
 
@@ -271,7 +323,8 @@ swift run voxa-dev ask "add numbers" --provider ollama --model qwen3:8b --base-u
 One server speaks Anthropic's Messages API, OpenAI's Responses API and Ollama's native chat API. It validates each request as
 the real service would (headers, tool-result adjacency, sorted tools, parameters a model rejects, OpenAI's message `phase`,
 Ollama's context window and tool support) and answers by keyword (see its header): `add numbers` (a script that needs
-confirmation), `inject` (a script whose output tries to redirect the model), `shell` (must be blocked), `unauthorized`,
+confirmation), `inject` (a script whose output tries to redirect the model), `shell` (must be blocked), `ui click reload`,
+`shot click`, `trash screenshots` and the other window, screenshot and file commands (see its header), `unauthorized`,
 `quota`, `overloaded`, `cutoff`, `refuse`, `slow`. It pretends to have four Ollama models, one of which can't use tools.
 
 Two scripts run the real Debug app against it, with settings in a throwaway preferences domain (yours are untouched) and
@@ -280,13 +333,23 @@ no system prompt ever appearing:
 ```bash
 scripts/build.sh
 scripts/e2e-providers.sh      # Claude, OpenAI and Ollama: a confirmation, the audit trail and every request
-scripts/e2e-tools.sh          # calendar, reminders, clipboard and context tools on sample data, an invitation with a hidden
+scripts/e2e-tools.sh          # calendar, reminders, clipboard and context tools on sample data, another app's window, screenshots
+                              # and files (a pretend Safari and a pretend disk), a page and a file name with a hidden
                               # instruction, the permission gate, spoken replies (one short sentence is said aloud), the walkthrough
 ```
 
-`e2e-tools.sh` uses two Debug-only variables: `VOXA_DEBUG_SAMPLE_DATA=1` (or `hostile`, which adds an event whose title tries to
-steer the model) makes the tools use made-up data, and `VOXA_DEBUG_TOOL_PERMISSIONS=calendars=denied,reminders=notDetermined`
-scripts the answers the permission gate gets.
+To try a build without disturbing the Voxa you are using, build it somewhere else and point the scripts at it:
+
+```bash
+DERIVED_DATA=/tmp/voxa-e2e scripts/build.sh && DERIVED_DATA=/tmp/voxa-e2e scripts/e2e-tools.sh
+```
+
+The test copy listens to notifications carrying a private suffix (`VOXA_DEBUG_HOOK_SUFFIX`), and the scripts only ever stop the
+copy they started, so the Voxa you are using neither hears them nor is stopped.
+
+`e2e-tools.sh` uses two Debug-only variables: `VOXA_DEBUG_SAMPLE_DATA=1` (or `hostile`, which adds an event, a page and a file
+name that try to steer the model) makes the tools use made-up data (a pretend Safari to click in, a pretend disk), and
+`VOXA_DEBUG_TOOL_PERMISSIONS=calendars=denied,accessibility=notDetermined` scripts the answers the permission gate gets.
 
 ### Debug builds
 
@@ -423,6 +486,39 @@ granted Accessibility permission: the automated checks use sample data and scrip
 - [ ] Settings → History: your commands appear with what happened; search finds one; *Show in Finder* reveals the file; *Clear
       History…* asks, then empties it.
 
+**Milestone 4: needs your Mac, Accessibility, Screen Recording and a Whisper download** (nothing below has been run against a real
+app's window, real synthetic input, a real screen capture of your apps, real files in your folders, or a downloaded Whisper model:
+the automated checks use a pretend desktop, a pretend disk and a made-up model. The real screenshot code was run once, on a
+window of its own. Use `make run-signed` so the Accessibility grant survives rebuilds.)
+
+- [ ] Settings → Permissions: press **Allow…** on Accessibility and switch Voxa on in System Settings; the row turns green
+      within a second or two. Same for Screen Recording (macOS may ask you to quit and reopen Voxa).
+- [ ] With TextEdit or Notes in front: *"press command N"* opens a new note or document, and no question is asked. *"Type hello
+      world"* types it where the cursor is (a notice, no question, as nothing outside has been read).
+- [ ] *"Click File and then Save As"* or *"click the Bold button"*: Voxa reads the window, then asks before clicking, and the card
+      names the control. Allow → it happens. Then *"press command Q"* in a scratch app: the card explains it quits the app.
+- [ ] Ask it to type into a password field (a website's login form): it refuses and says it doesn't type into password fields.
+- [ ] Put Terminal in front and ask it to type something: it refuses ("runs whatever is typed into it"). The same in 1Password or
+      Keychain Access, for reading the window and for a screenshot.
+- [ ] *"What's on this page?"* in Safari: the reply describes what the window listing found. If a control isn't listed (a
+      canvas, an image button, a Chrome or Electron app, which show little until their accessibility is on), ask *"take a
+      screenshot and click the play button"*: after the screenshot it asks, and the click lands on the right spot.
+- [ ] *"Take a screenshot"*: a notice, and the reply describes the window (not the desktop around it). *"…of the whole screen"*
+      asks first. Voxa's own card is not in the picture. Ask a follow-up: it doesn't have the picture any more.
+- [ ] While a click is waiting for your answer, switch to another app and allow it: nothing is clicked, and Voxa says the app
+      changed. Move the window between a screenshot and the click: nothing is clicked.
+- [ ] *"Find my invoices"* lists real files from your home folder; *"show me the first one"* reveals it in Finder.
+- [ ] *"Move the file called … to my Documents folder"*: macOS may first ask to let Voxa into that folder; then the card lists what
+      goes where, and after Allow the file moves. A name that is already taken stops it. *"Trash the … files"* asks with the list,
+      the files land in the Trash, and **Put Back** returns them. *"Delete my .ssh folder"* is refused without a question.
+- [ ] Settings → General → Speech recognition → Whisper: the model list appears with sizes. Download **Base (English)**: progress
+      shows, then *Getting it ready for this Mac (once)…*, then *Ready*; **Use this one** if it isn't already in use. Hold ⌥Space
+      and speak: text appears while you talk and the command works. Quit and reopen: the first command after launch is quick.
+- [ ] Turn Wi-Fi off after the model is ready: Whisper still works. **Remove** the model: the next command says the model isn't
+      downloaded, with a button that opens Settings. Cancel a download part-way: it stops, and Download carries on from there.
+- [ ] Say nothing while Whisper is on: *I didn't catch that*, never invented words such as "Thank you for watching".
+- [ ] (Ollama) With a model that can't see images, ask for a screenshot: the model is told it can't, and says so in its reply.
+
 **Model providers: needs your OpenAI key and/or Ollama with a tool-capable model**
 
 - [ ] Settings → Model → **OpenAI**: paste your key, Save, **Test connection** says *Connected*. *"Open Notes"* works, and
@@ -442,8 +538,8 @@ granted Accessibility permission: the automated checks use sample data and scrip
 | M1 | Menu-bar shell, hotkey, audio capture, Apple STT, HUD with live transcript | done |
 | M2 | LLM client + agent loop, `open_app` / `open_url` / `run_shortcut` / `run_applescript`, policy engine, confirmation HUD | done |
 | M3 | Permissions manager + welcome guide, calendar / reminders / clipboard / context tools, spoken replies, full settings, history viewer | done |
-| M4 | Accessibility UI tools, screenshot + vision fallback, WhisperKit engine | next |
-| M5 | Hardening, signing and notarization scripts, DMG, final docs | |
+| M4 | Accessibility UI tools, screenshot + vision fallback, file tools, WhisperKit engine | done |
+| M5 | Hardening, signing and notarization scripts, DMG, final docs | next |
 
 ## License
 

@@ -1,33 +1,63 @@
 import Foundation
 
-/// The parts of the Mac that the calendar, reminders, clipboard and context tools reach into, gathered so they can be swapped
-/// as one: the real thing in the app, or sample data in a Debug run, a demo or a test.
+/// The parts of the Mac that the tools reach into (calendar, reminders, clipboard, the front app and its windows, the screen,
+/// the user's files), gathered so they can be swapped as one: the real thing in the app, or sample data in a Debug run, a demo
+/// or a test.
 public struct SystemAccess: Sendable {
     public var calendar: any CalendarAccessing
     public var reminders: any RemindersAccessing
     public var clipboard: any ClipboardAccessing
     public var frontmost: any FrontmostContextProviding
+    /// Reads and drives the front app's window. Also says which app that is.
+    public var ui: any UIAutomating
+    public var screen: any ScreenCapturing
+    /// The screenshots taken so far, shared by the screenshot tool and the click tool.
+    public var screenshots: ScreenshotRegistry
+    public var files: any FileAccessing
 
     public init(
         calendar: any CalendarAccessing,
         reminders: any RemindersAccessing,
         clipboard: any ClipboardAccessing,
-        frontmost: any FrontmostContextProviding
+        frontmost: any FrontmostContextProviding,
+        ui: any UIAutomating,
+        screen: any ScreenCapturing,
+        screenshots: ScreenshotRegistry,
+        files: any FileAccessing
     ) {
         self.calendar = calendar
         self.reminders = reminders
         self.clipboard = clipboard
         self.frontmost = frontmost
+        self.ui = ui
+        self.screen = screen
+        self.screenshots = screenshots
+        self.files = files
     }
 
-    /// The user's own calendars, reminders, clipboard and front app. The tools that use these are held back by the agent loop
-    /// until the matching permission has been granted.
-    public static func real() -> SystemAccess {
-        SystemAccess(
+    /// The user's own calendars, reminders, clipboard, front app, windows, screen and files. The tools that use these are held
+    /// back by the agent loop until the matching permission has been granted.
+    ///
+    /// - Parameter frontmost: The one that follows which app is in front. The app starts it at launch; it is shared with the
+    ///   UI tools so both agree on what "the front app" is.
+    public static func real(frontmost: SystemFrontmostContext = SystemFrontmostContext()) -> SystemAccess {
+        let screenshots = ScreenshotRegistry()
+        let ui = AccessibilityAutomation(
+            tree: SystemAccessibilityTree(),
+            input: CGEventInputSynthesizer(),
+            windows: SystemWindowList(),
+            frontmost: frontmost,
+            screenshots: screenshots
+        )
+        return SystemAccess(
             calendar: EventKitCalendar(),
             reminders: EventKitReminders(),
             clipboard: SystemClipboard(),
-            frontmost: SystemFrontmostContext()
+            frontmost: frontmost,
+            ui: ui,
+            screen: SystemScreenCapture(),
+            screenshots: screenshots,
+            files: SystemFiles()
         )
     }
 
@@ -35,7 +65,7 @@ public struct SystemAccess: Sendable {
     /// relative to `now`, so "today" and "tomorrow" always have something on them.
     ///
     /// - Parameter hostile: Adds an event whose title carries an instruction aimed at the model, the way a calendar invitation
-    ///   from a stranger could, to see that the defenses hold.
+    ///   from a stranger could, and the same on the page in front and in a file name, to see that the defenses hold.
     public static func sample(now: Date = Date(), timeZone: TimeZone = .current, hostile: Bool = false) -> SystemAccess {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
@@ -44,6 +74,12 @@ public struct SystemAccess: Sendable {
             let base = calendar.date(byAdding: .day, value: offset, to: today) ?? today
             return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: base) ?? base
         }
+
+        // A pretend Safari, with no delays, standing in for the window server, the Accessibility API and the keyboard.
+        let desktop = SampleDesktop.safari(hostile: hostile)
+        let screenshots = ScreenshotRegistry()
+        var limits = AccessibilityAutomation.Limits()
+        limits.settleDelay = .milliseconds(20)
 
         return SystemAccess(
             calendar: InMemoryCalendar(events: sampleEvents(day: day, hostile: hostile)),
@@ -57,7 +93,18 @@ public struct SystemAccess: Sendable {
                     selectedText: "Actors protect their mutable state.",
                     accessibilityGranted: true
                 )
-            )
+            ),
+            ui: AccessibilityAutomation(
+                tree: desktop,
+                input: desktop,
+                windows: desktop,
+                frontmost: desktop,
+                screenshots: screenshots,
+                limits: limits
+            ),
+            screen: SampleScreen(desktop: desktop),
+            screenshots: screenshots,
+            files: InMemoryFiles.sample(now: now, hostile: hostile)
         )
     }
 

@@ -135,7 +135,7 @@ struct OnboardingView: View {
                     }
                 }
                 Section {
-                    ForEach([PermissionKind.calendars, .reminders, .accessibility], id: \.self) { kind in
+                    ForEach([PermissionKind.calendars, .reminders, .accessibility, .screenRecording], id: \.self) { kind in
                         PermissionRow(kind: kind, model: services.permissions)
                     }
                 } header: {

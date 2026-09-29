@@ -31,8 +31,11 @@ public enum Schema {
         ["type": "boolean", "description": .string(description)]
     }
 
-    public static func array(of items: JSONValue, _ description: String) -> JSONValue {
-        ["type": "array", "items": items, "description": .string(description)]
+    public static func array(of items: JSONValue, _ description: String, minItems: Int? = nil, maxItems: Int? = nil) -> JSONValue {
+        var schema: [String: JSONValue] = ["type": "array", "items": items, "description": .string(description)]
+        if let minItems { schema["minItems"] = .int(minItems) }
+        if let maxItems { schema["maxItems"] = .int(maxItems) }
+        return .object(schema)
     }
 
     /// An object schema. `additionalProperties` is false so the model can't smuggle extra arguments.

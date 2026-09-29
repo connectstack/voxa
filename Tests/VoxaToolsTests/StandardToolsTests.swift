@@ -17,7 +17,9 @@ private func sample(from schema: JSONValue, key: String? = nil) -> JSONValue {
     case "integer": return .int(schema["minimum"]?.intValue ?? 1)
     case "number": return .double(1)
     case "boolean": return true
-    case "array": return .array([])
+    case "array":
+        let count = schema["minItems"]?.intValue ?? 0
+        return .array((0..<count).map { _ in sample(from: schema["items"] ?? [:], key: key) })
     case "object":
         var object: [String: JSONValue] = [:]
         let properties = schema["properties"]?.objectValue ?? [:]
@@ -52,6 +54,8 @@ struct StandardToolsTests {
                 "open_app", "open_url", "list_shortcuts", "run_shortcut", "run_applescript",
                 "calendar_list_events", "calendar_create_event", "calendar_update_event", "calendar_delete_event",
                 "reminders_list", "reminders_create", "clipboard_read", "clipboard_write", "get_frontmost_context",
+                "ui_inspect", "ui_click", "ui_type", "ui_press_keys", "screenshot",
+                "file_search", "reveal_in_finder", "file_move", "file_trash",
             ]
         )
         for tool in tools {
@@ -101,9 +105,17 @@ struct StandardToolsTests {
         #expect(byName["clipboard_read"] == .reversible)
         #expect(byName["clipboard_write"] == .reversible)
         #expect(byName["get_frontmost_context"] == .readOnly)
+        #expect(byName["ui_inspect"] == .readOnly)
+        for name in ["ui_click", "ui_type", "ui_press_keys", "screenshot"] {
+            #expect(byName[name] == .reversible, "\(name)")
+        }
+        #expect(byName["file_search"] == .readOnly && byName["reveal_in_finder"] == .readOnly)
+        #expect(byName["file_move"] == .sensitive && byName["file_trash"] == .sensitive)
     }
 
-    @Test("every tool that declares itself sensitive is also floored sensitive by the policy, so a wrong tool can't lower its own bar")
+    @Test(
+        "every tool that declares itself sensitive is also floored sensitive by the policy, so a wrong tool can't lower its own bar"
+    )
     func floorsAgreeWithTools() {
         for tool in tools where tool.baselineRisk == .sensitive {
             #expect(PolicyFloors.floor(for: tool.name) == .sensitive, "\(tool.name)")
@@ -129,9 +141,23 @@ struct StandardToolsTests {
         #expect(byName["run_applescript"] == [.automation])
     }
 
+    @Test(
+        "the tools that drive or read other apps need Accessibility, and the one that looks at the screen needs Screen Recording")
+    func uiPermissions() {
+        let byName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.requiredPermissions) })
+        for name in ["ui_inspect", "ui_click", "ui_type", "ui_press_keys"] {
+            #expect(byName[name] == [.accessibility], "\(name)")
+        }
+        #expect(byName["screenshot"] == [.screenRecording])
+        for name in ["file_search", "reveal_in_finder", "file_move", "file_trash"] {
+            #expect(byName[name]?.isEmpty == true, "\(name): macOS asks for folder access itself, when it is needed")
+        }
+    }
+
     @Test("what tools return from outside the app is marked untrusted: calendar, reminders, clipboard and window text")
     func outsideContentIsUntrusted() async throws {
-        let sample = SystemAccess.sample(now: Date(timeIntervalSince1970: 1_790_739_000), timeZone: TimeZone(identifier: "Asia/Kolkata")!)
+        let sample = SystemAccess.sample(
+            now: Date(timeIntervalSince1970: 1_790_739_000), timeZone: TimeZone(identifier: "Asia/Kolkata")!)
         let tools = StandardTools.make(
             catalog: FakeAppCatalog.standard,
             opener: FakeOpener(),
@@ -139,13 +165,19 @@ struct StandardToolsTests {
             system: sample
         )
         let byName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
-        for name in ["calendar_list_events", "reminders_list", "clipboard_read", "get_frontmost_context"] {
+        for name in [
+            "calendar_list_events", "reminders_list", "clipboard_read", "get_frontmost_context", "ui_inspect", "screenshot",
+        ] {
             let result = try await #require(byName[name]).execute([:], context: ToolContext())
             #expect(result.provenance.isUntrusted, "\(name) returned \(result.plainText)")
         }
+        let files = try await #require(byName["file_search"]).execute(["query": "invoice"], context: ToolContext())
+        #expect(files.provenance.isUntrusted, "file names are outside data")
     }
 
-    @Test("every tool has a friendly title, a one-line description and a category for the Tools tab, so none shows up as a raw name")
+    @Test(
+        "every tool has a friendly title, a one-line description and a category for the Tools tab, so none shows up as a raw name"
+    )
     func toolsTabText() {
         for tool in tools {
             let title = L10n.ToolsUI.title(for: tool.name)

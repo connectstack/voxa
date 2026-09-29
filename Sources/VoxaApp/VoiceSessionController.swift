@@ -216,7 +216,11 @@ public final class VoiceSessionController {
     /// first press after launch isn't spent waiting on it. Call once at launch; safe to call again.
     public func prewarm() async {
         let snapshot = settings.current
-        _ = await recognizers.recognizer(for: snapshot).requiredPermissions(locale: snapshot.locale)
+        let recognizer = recognizers.recognizer(for: snapshot)
+        _ = await recognizer.requiredPermissions(locale: snapshot.locale)
+        // A Whisper model takes a moment to load; doing it now means the first command doesn't wait for it. If the model isn't
+        // downloaded, that is for the person to be told when they speak, not something to raise at launch.
+        if snapshot.speechEngine == .whisper { try? await recognizer.prepare(locale: snapshot.locale) }
     }
 
     /// The user pressed Esc: abort the running command, or dismiss a result or error that is still showing.

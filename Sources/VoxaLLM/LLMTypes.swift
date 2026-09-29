@@ -42,6 +42,29 @@ public struct LLMMessage: Sendable, Equatable {
     public static func user(_ text: String) -> LLMMessage {
         LLMMessage(role: .user, content: [.text(text)])
     }
+
+    /// Whether any tool result in the message carries a picture.
+    public var containsImages: Bool {
+        content.contains { block in
+            guard case .toolResult(_, let parts, _) = block else { return false }
+            return parts.contains { if case .image = $0 { true } else { false } }
+        }
+    }
+
+    /// The same message with each picture in a tool result replaced by `note`, for a model that can't take pictures.
+    public func replacingImages(with note: String) -> LLMMessage {
+        LLMMessage(
+            role: role,
+            content: content.map { block in
+                guard case .toolResult(let id, let parts, let isError) = block else { return block }
+                return .toolResult(
+                    toolUseID: id,
+                    content: parts.map { if case .image = $0 { .text(note) } else { $0 } },
+                    isError: isError
+                )
+            }
+        )
+    }
 }
 
 // MARK: - Request

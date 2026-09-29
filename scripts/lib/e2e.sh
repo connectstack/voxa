@@ -11,11 +11,17 @@ PORT="${PORT:-8899}"
 APP="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
 SUITE="com.rohitsainier.voxa.e2e"
 WORK="$(mktemp -d)"
+# The test copy of the app listens to notifications with this suffix, and only this script sends them, so a Voxa that someone is
+# using at the same time never hears them (and this script never touches it: it only ever stops the copy it started).
+HOOK_SUFFIX="e2e$$"
+hook() { notifyutil -p "com.rohitsainier.voxa.debug.$1.$HOOK_SUFFIX"; }
+kill_app() { pkill -f "$APP/Contents/MacOS/" 2>/dev/null || true; }
+app_running() { pgrep -f "$APP/Contents/MacOS/" >/dev/null; }
 FAILURES=0
 MOCK_PID=""
 
 e2e_cleanup() {
-    pkill -x "$APP_NAME" 2>/dev/null || true
+    kill_app
     if [[ -n "$MOCK_PID" ]]; then
         kill "$MOCK_PID" 2>/dev/null || true
         wait "$MOCK_PID" 2>/dev/null || true
@@ -28,7 +34,7 @@ e2e_init() {
     [[ -d "$APP" ]] || die "no Debug app at $APP; run scripts/build.sh first"
     require python3 "python3 is needed for the mock server"
     trap e2e_cleanup EXIT
-    pkill -x "$APP_NAME" 2>/dev/null || true
+    kill_app
     log "Starting the mock server on port $PORT"
     python3 "$ROOT/scripts/mock-llm-server.py" --port "$PORT" --log "$WORK/requests.jsonl" >"$WORK/mock.out" 2>&1 &
     MOCK_PID=$!
@@ -65,19 +71,19 @@ write_settings() { # write_settings <json>
 
 # launch [extra --env NAME=value ...]: starts the app pointed at the mock and waits until it answers its debug hooks.
 launch() {
-    pkill -x "$APP_NAME" 2>/dev/null || true
+    kill_app
     sleep 0.5
     rm -f "$WORK/audit.jsonl" "$WORK/report.txt"
     open -n --env "VOXA_ANTHROPIC_BASE_URL=http://127.0.0.1:$PORT" --env VOXA_DEBUG_API_KEY=sk-ant-mock \
         --env VOXA_DEBUG_OPENAI_API_KEY=sk-mock --env "VOXA_DEBUG_DEFAULTS_SUITE=$SUITE" \
-        --env "VOXA_DEBUG_COMMAND_FILE=$WORK/command.txt" --env "VOXA_DEBUG_REPORT_FILE=$WORK/report.txt" \
+        --env "VOXA_DEBUG_HOOK_SUFFIX=$HOOK_SUFFIX" --env "VOXA_DEBUG_COMMAND_FILE=$WORK/command.txt" --env "VOXA_DEBUG_REPORT_FILE=$WORK/report.txt" \
         --env "VOXA_DEBUG_AUDIT_PATH=$WORK/audit.jsonl" --env "VOXA_DEBUG_SAY_FILE=$WORK/say.txt" "$@" "$APP"
-    wait_for 15 pgrep -x "$APP_NAME" || die "the app did not start"
+    wait_for 15 app_running || die "the app did not start"
     # A freshly built app can take a few seconds to start (macOS scans it first). It is ready once it answers a report request.
     wait_for 40 ready || die "the app started but never answered its debug hooks"
 }
 
-report() { rm -f "$WORK/report.txt"; notifyutil -p com.rohitsainier.voxa.debug.report; wait_for 3 test -s "$WORK/report.txt"; cat "$WORK/report.txt"; }
+report() { rm -f "$WORK/report.txt"; hook report; wait_for 3 test -s "$WORK/report.txt"; cat "$WORK/report.txt"; }
 ready() { report | grep -q "status="; }
 report_has() { report | grep -q "$1"; }
 
@@ -123,7 +129,7 @@ PY
 ask() {
     MARK="$(audit_lines)"
     printf '%s' "$1" >"$WORK/command.txt"
-    notifyutil -p com.rohitsainier.voxa.debug.ask
+    hook ask
     wait_for 20 finished_or_asking
 }
 finished_or_asking() { audit_has "$MARK" reply || audit_has "$MARK" failure || report_has "awaiting=true"; }
@@ -133,7 +139,7 @@ is_asking() { report_has "awaiting=true"; }
 answer() {
     wait_for 10 is_asking || true
     sleep 1
-    notifyutil -p "com.rohitsainier.voxa.debug.button.$1"
+    hook "button.$1"
     wait_for 20 finished
 }
 finished() { audit_has "$MARK" reply || audit_has "$MARK" failure; }

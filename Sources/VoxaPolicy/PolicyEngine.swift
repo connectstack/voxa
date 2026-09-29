@@ -48,7 +48,8 @@ public enum PolicyFloors {
     public static func floor(for toolName: String) -> RiskLevel {
         switch toolName {
         case "run_applescript", "run_shortcut", "file_move", "file_trash", "calendar_update_event", "calendar_delete_event": .sensitive
-        case "ui_click", "ui_type", "ui_press_keys", "clipboard_read", "clipboard_write", "calendar_create_event", "reminders_create":
+        case "ui_click", "ui_type", "ui_press_keys", "screenshot", "clipboard_read", "clipboard_write", "calendar_create_event",
+            "reminders_create":
             .reversible
         default: .readOnly
         }

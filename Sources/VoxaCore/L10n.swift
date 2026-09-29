@@ -76,6 +76,9 @@ public enum L10n {
         public static var engineClassic: String {
             String(localized: "Classic on-device recognizer", comment: "Speech engine option")
         }
+        public static var engineWhisper: String {
+            String(localized: "Whisper (downloaded model)", comment: "Speech engine option")
+        }
         public static var engineHelp: String {
             String(
                 localized:

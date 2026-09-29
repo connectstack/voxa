@@ -43,7 +43,7 @@ extension L10n {
         }
 
         public enum Category: String, CaseIterable, Identifiable {
-            case apps, scripts, calendar, clipboard, other
+            case apps, scripts, calendar, clipboard, windows, files, other
             public var id: String { rawValue }
 
             public var title: String {
@@ -51,7 +51,9 @@ extension L10n {
                 case .apps: String(localized: "Apps and web", comment: "Tools category")
                 case .scripts: String(localized: "Shortcuts and scripts", comment: "Tools category")
                 case .calendar: String(localized: "Calendar and reminders", comment: "Tools category")
-                case .clipboard: String(localized: "Clipboard and screen", comment: "Tools category")
+                case .clipboard: String(localized: "Clipboard and context", comment: "Tools category")
+                case .windows: String(localized: "Other apps and the screen", comment: "Tools category")
+                case .files: String(localized: "Files", comment: "Tools category")
                 case .other: String(localized: "Other", comment: "Tools category")
                 }
             }
@@ -63,6 +65,8 @@ extension L10n {
             case "list_shortcuts", "run_shortcut", "run_applescript": .scripts
             case _ where tool.hasPrefix("calendar_") || tool.hasPrefix("reminders_"): .calendar
             case "clipboard_read", "clipboard_write", "get_frontmost_context": .clipboard
+            case "ui_inspect", "ui_click", "ui_type", "ui_press_keys", "screenshot": .windows
+            case "file_search", "reveal_in_finder", "file_move", "file_trash": .files
             default: .other
             }
         }
@@ -83,6 +87,15 @@ extension L10n {
             case "clipboard_read": String(localized: "Read the clipboard", comment: "Tool name")
             case "clipboard_write": String(localized: "Copy to the clipboard", comment: "Tool name")
             case "get_frontmost_context": String(localized: "See what's in front", comment: "Tool name")
+            case "ui_inspect": String(localized: "Look at an app's window", comment: "Tool name")
+            case "ui_click": String(localized: "Click in other apps", comment: "Tool name")
+            case "ui_type": String(localized: "Type into other apps", comment: "Tool name")
+            case "ui_press_keys": String(localized: "Press keyboard shortcuts", comment: "Tool name")
+            case "screenshot": String(localized: "Look at the screen", comment: "Tool name")
+            case "file_search": String(localized: "Find files", comment: "Tool name")
+            case "reveal_in_finder": String(localized: "Show files in Finder", comment: "Tool name")
+            case "file_move": String(localized: "Move files", comment: "Tool name")
+            case "file_trash": String(localized: "Move files to the Trash", comment: "Tool name")
             default: tool.replacingOccurrences(of: "_", with: " ").capitalized
             }
         }
@@ -103,6 +116,15 @@ extension L10n {
             case "clipboard_read": String(localized: "Reads the text you copied. Never anything a password manager marked secret.", comment: "Tool description")
             case "clipboard_write": String(localized: "Puts text on your clipboard for you to paste.", comment: "Tool description")
             case "get_frontmost_context": String(localized: "Checks which app is in front and what is selected there.", comment: "Tool description")
+            case "ui_inspect": String(localized: "Reads the names of the buttons, fields and menus of the app in front.", comment: "Tool description")
+            case "ui_click": String(localized: "Presses buttons and menu items in the app in front.", comment: "Tool description")
+            case "ui_type": String(localized: "Types where the cursor is. Never into a password field.", comment: "Tool description")
+            case "ui_press_keys": String(localized: "Presses keys and shortcuts, such as ⌘S, in the app in front.", comment: "Tool description")
+            case "screenshot": String(localized: "Takes a picture of the front window for the model to read, as a last resort.", comment: "Tool description")
+            case "file_search": String(localized: "Looks up files by name in your home folder.", comment: "Tool description")
+            case "reveal_in_finder": String(localized: "Shows a file in a Finder window.", comment: "Tool description")
+            case "file_move": String(localized: "Moves files into a folder, once you approve. Never replaces anything.", comment: "Tool description")
+            case "file_trash": String(localized: "Puts files in the Trash, once you approve. Never deletes anything.", comment: "Tool description")
             default: fallback
             }
         }

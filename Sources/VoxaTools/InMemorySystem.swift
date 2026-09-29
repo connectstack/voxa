@@ -33,7 +33,7 @@ public final class InMemoryClipboard: ClipboardAccessing, @unchecked Sendable {
 }
 
 /// A frontmost app that is whatever it was told to be, for tests and for sample-data runs.
-public final class StaticFrontmostContext: FrontmostContextProviding, @unchecked Sendable {
+public final class StaticFrontmostContext: FrontmostContextProviding, FrontmostAppProviding, @unchecked Sendable {
     private let context = OSAllocatedUnfairLock<FrontmostContext?>(initialState: nil)
 
     public init(_ context: FrontmostContext? = nil) {
@@ -46,4 +46,9 @@ public final class StaticFrontmostContext: FrontmostContextProviding, @unchecked
     }
 
     public func snapshot() async -> FrontmostContext? { value }
+
+    /// The same app, as the UI tools want to hear about it. There is no process behind it, so its number is made up.
+    public func currentApp() -> FrontmostApp? {
+        value.map { FrontmostApp(name: $0.appName, bundleID: $0.bundleID, pid: 1) }
+    }
 }

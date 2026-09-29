@@ -6,6 +6,8 @@ public enum SpeechEngineKind: String, Codable, CaseIterable, Sendable, Identifia
     case appleAutomatic
     /// `SFSpeechRecognizer`, forced to on-device recognition.
     case appleClassic
+    /// OpenAI's Whisper, run on this Mac through Core ML. Needs a model downloaded first (Settings → General).
+    case whisper
 
     public var id: String { rawValue }
 }
@@ -57,6 +59,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Whether the automatic speech engine may download Apple's newer on-device model in the background. Until it has
     /// finished (or if this is off) the classic on-device recognizer is used.
     public var downloadSpeechModel: Bool
+    /// Which Whisper model to use when `speechEngine` is `.whisper`: an `id` from `WhisperModelCatalog`.
+    public var whisperModel: String
 
     // MARK: Agent
 
@@ -106,6 +110,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         localeIdentifier: String = AppSettings.systemLocaleIdentifier,
         maxRecordingSeconds: Int = AppSettings.defaultMaxRecordingSeconds,
         downloadSpeechModel: Bool = true,
+        whisperModel: String = WhisperModelCatalog.defaultID,
         provider: ModelProvider = .anthropic,
         model: String = AppSettings.defaultModel,
         openAIModel: String = AppSettings.defaultOpenAIModel,
@@ -128,6 +133,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.localeIdentifier = localeIdentifier
         self.maxRecordingSeconds = maxRecordingSeconds
         self.downloadSpeechModel = downloadSpeechModel
+        self.whisperModel = whisperModel
         self.provider = provider
         self.model = model
         self.openAIModel = openAIModel
@@ -150,7 +156,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var locale: Locale { Locale(identifier: localeIdentifier) }
 
     private enum CodingKeys: String, CodingKey {
-        case speechEngine, localeIdentifier, maxRecordingSeconds, downloadSpeechModel
+        case speechEngine, localeIdentifier, maxRecordingSeconds, downloadSpeechModel, whisperModel
         case provider, model, openAIModel, openAIBaseURL, ollamaModel, ollamaBaseURL, ollamaContextLength
         case effort, useRefusalFallback, maxAgentSteps, followUpWindowSeconds
         case speakReplies, voiceIdentifier, speechRate
@@ -176,6 +182,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
             let stored = value(key, fallback).trimmingCharacters(in: .whitespacesAndNewlines)
             return stored.isEmpty && !allowEmpty ? fallback : stored
         }
+        // A model name that isn't one Voxa offers (edited by hand, or from a later version) falls back to the default.
+        let chosen = text(.whisperModel, defaults.whisperModel)
+        whisperModel = WhisperModelCatalog.model(chosen) == nil ? defaults.whisperModel : chosen
         model = text(.model, defaults.model)
         openAIModel = text(.openAIModel, defaults.openAIModel)
         openAIBaseURL = text(.openAIBaseURL, defaults.openAIBaseURL)

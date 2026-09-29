@@ -10,6 +10,7 @@ import VoxaSettings
 import VoxaSpeech
 import VoxaTools
 import VoxaVoice
+import VoxaWhisper
 
 /// The composition root: builds the concrete services once and wires them together. Nothing else in the app
 /// constructs a service, so swapping an implementation (or a fake, in tests) is a change in exactly one place.
@@ -32,6 +33,8 @@ public final class AppEnvironment {
     let settingsServices: SettingsServices
     private let frontmost: SystemFrontmostContext
 
+    // The composition root: it builds each service once and wires them together, so its length is the wiring itself.
+    // swiftlint:disable:next function_body_length
     public init(defaults: UserDefaults = .standard) {
         let overrides = DevelopmentOverrides.current
         let settings = SettingsStore(defaults: overrides.settingsDefaults ?? defaults)
@@ -54,6 +57,10 @@ public final class AppEnvironment {
             overrides.permissionStatuses.isEmpty ? permissions : ScriptedPermissions(overrides.permissionStatuses, real: permissions)
         let permissionsModel = PermissionsModel(permissions: toolPermissions, kinds: SettingsServices.listedPermissions)
 
+        // Whisper is downloaded only when the person asks in Settings; until then choosing it falls back to Apple's recognizer.
+        let whisper = WhisperSupport()
+        let whisperModels = WhisperModelsModel(actions: whisper.modelActions)
+
         let confirmations = ConfirmationCoordinator(hud: hud, hotkeys: hotkeys, speaker: speaker)
         let agent = AgentService(
             llm: llm,
@@ -74,6 +81,7 @@ public final class AppEnvironment {
             openOllama: { OllamaLauncher.launch() },
             permissions: permissionsModel,
             voice: VoiceServices(voices: { speaker.voices() }, speakSample: { speaker.speakSample() }),
+            whisper: whisperModels,
             tools: Self.toolInfos(tools),
             audit: audit,
             launchAtLogin: SystemLaunchAtLogin(),
@@ -98,7 +106,7 @@ public final class AppEnvironment {
         self.frontmost = frontmost
         self.session = VoiceSessionController(
             capture: MicrophoneCapture(),
-            recognizers: DefaultSpeechRecognizerProvider(),
+            recognizers: DefaultSpeechRecognizerProvider(whisper: { whisper.recognizer(for: $0) }),
             permissions: permissions,
             hud: hud,
             hotkeys: hotkeys,
@@ -149,16 +157,11 @@ public final class AppEnvironment {
         )
     }
 
-    /// The real calendar, reminders, clipboard and front app, or, in a development run, made-up sample data that nobody's real
-    /// calendar is touched by.
+    /// The real calendar, reminders, clipboard, windows, screen and files, or, in a development run, made-up sample data that
+    /// nobody's real anything is touched by.
     private static func makeSystemAccess(_ overrides: DevelopmentOverrides, frontmost: SystemFrontmostContext) -> SystemAccess {
         if let sample = overrides.sampleData { return .sample(hostile: sample == .hostile) }
-        return SystemAccess(
-            calendar: EventKitCalendar(),
-            reminders: EventKitReminders(),
-            clipboard: SystemClipboard(),
-            frontmost: frontmost
-        )
+        return .real(frontmost: frontmost)
     }
 
     /// What the Tools tab shows for each tool: its name and description, and how the policy will treat it at the least.
@@ -203,7 +206,7 @@ struct DevelopmentOverrides {
     var auditLogURL: URL?
     /// Keeps settings in a separate preferences domain, so a test run can't change the user's real ones.
     var settingsDefaults: UserDefaults?
-    /// Runs the calendar, reminders, clipboard and front-app tools against made-up data instead of the real thing.
+    /// Runs the calendar, reminders, clipboard, window, screenshot and file tools against made-up data instead of the real thing.
     var sampleData: SampleData?
 
     enum SampleData { case plain, hostile }

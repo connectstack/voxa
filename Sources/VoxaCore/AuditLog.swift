@@ -60,7 +60,7 @@ public actor JSONLAuditLog: AuditLogging, AuditReading {
     public func sizeOnDisk() -> Int {
         [rotatedURL, url].reduce(0) { total, file in
             let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
-            return total + (size ?? 0)
+            return total + size
         }
     }
 
