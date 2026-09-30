@@ -19,9 +19,14 @@ import VoxaSettings
 public final class KeyboardShortcutsHotkeyService: HotkeyService {
     /// Kept in sync with the recorder in Settings so menus and the HUD always show the current shortcut.
     public private(set) var pushToTalkDescription: String?
+    /// The same for the shortcut that opens the Voxa bar.
+    public private(set) var openBarDescription: String?
 
     @ObservationIgnored public let pushToTalk: AsyncStream<PushToTalkEvent>
     @ObservationIgnored private let continuation: AsyncStream<PushToTalkEvent>.Continuation
+    @ObservationIgnored public let openBarPresses: AsyncStream<Void>
+    @ObservationIgnored private let openBarContinuation: AsyncStream<Void>.Continuation
+    @ObservationIgnored private var openBarListener: Task<Void, Never>?
     @ObservationIgnored private var listener: Task<Void, Never>?
     @ObservationIgnored private var shortcutObserver: (any NSObjectProtocol)?
     #if DEBUG
@@ -34,7 +39,11 @@ public final class KeyboardShortcutsHotkeyService: HotkeyService {
         let (stream, continuation) = AsyncStream<PushToTalkEvent>.makeStream()
         self.pushToTalk = stream
         self.continuation = continuation
+        let (opens, opensContinuation) = AsyncStream<Void>.makeStream()
+        self.openBarPresses = opens
+        self.openBarContinuation = opensContinuation
         self.pushToTalkDescription = Self.currentDescription()
+        self.openBarDescription = Self.currentDescription(for: .openBar)
     }
 
     /// Begins listening. Call once at launch.
@@ -48,14 +57,26 @@ public final class KeyboardShortcutsHotkeyService: HotkeyService {
             }
         }
 
+        let opens = KeyboardShortcuts.events(.keyDown, for: .openBar)
+        openBarListener = Task { [weak self] in
+            for await _ in opens {
+                Log.hotkey.notice("open-the-bar key down")
+                self?.openBarContinuation.yield()
+            }
+        }
+
         // KeyboardShortcuts posts this notification whenever a named shortcut changes. The name is an implementation
         // detail of the package; if it ever changes, the only effect is that the label refreshes on next launch.
         shortcutObserver = NotificationCenter.default.addObserver(
             forName: Notification.Name("KeyboardShortcuts_shortcutByNameDidChange"), object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.pushToTalkDescription = Self.currentDescription() }
+            MainActor.assumeIsolated {
+                self?.pushToTalkDescription = Self.currentDescription()
+                self?.openBarDescription = Self.currentDescription(for: .openBar)
+            }
         }
         pushToTalkDescription = Self.currentDescription()
+        openBarDescription = Self.currentDescription(for: .openBar)
         Log.hotkey.notice("push-to-talk shortcut registered")
     }
 
@@ -127,7 +148,7 @@ public final class KeyboardShortcutsHotkeyService: HotkeyService {
         }
     }
 
-    private static func currentDescription() -> String? {
-        KeyboardShortcuts.getShortcut(for: .pushToTalk)?.description
+    private static func currentDescription(for name: KeyboardShortcuts.Name = .pushToTalk) -> String? {
+        KeyboardShortcuts.getShortcut(for: name)?.description
     }
 }

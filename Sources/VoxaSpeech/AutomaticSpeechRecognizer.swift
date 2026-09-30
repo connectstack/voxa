@@ -134,13 +134,8 @@ public struct AutomaticSpeechRecognizer: SpeechRecognizer {
 /// The production recognizer factory.
 public struct DefaultSpeechRecognizerProvider: SpeechRecognizerProviding {
     private let downloader = SpeechModelDownloader()
-    private let whisper: (@Sendable (AppSettings) -> any SpeechRecognizer)?
 
-    /// - Parameter whisper: Builds the Whisper engine. It comes from a module of its own (the one that carries the Whisper
-    ///   library), so the app passes it in; without it, choosing Whisper falls back to the classic recognizer.
-    public init(whisper: (@Sendable (AppSettings) -> any SpeechRecognizer)? = nil) {
-        self.whisper = whisper
-    }
+    public init() {}
 
     public func recognizer(for settings: AppSettings) -> any SpeechRecognizer {
         switch settings.speechEngine {
@@ -156,8 +151,6 @@ public struct DefaultSpeechRecognizerProvider: SpeechRecognizerProviding {
                 downloader: downloader,
                 allowsModelDownload: settings.downloadSpeechModel
             )
-        case .whisper:
-            return whisper?(settings) ?? SFSpeechRecognizerEngine()
         }
     }
 }

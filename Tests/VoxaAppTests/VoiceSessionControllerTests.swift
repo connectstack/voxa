@@ -7,26 +7,19 @@ import VoxaHUD
 import VoxaSpeech
 import VoxaTestSupport
 
-/// Counts how often the session asks which permissions it needs, and how often it asks the engine to get ready.
+/// Counts how often the session asks which permissions it needs.
 private final class CountingRecognizer: SpeechRecognizer, @unchecked Sendable {
     private let lock = NSLock()
     private var queries = 0
-    private var prepares = 0
-    /// What getting ready does: nothing, or fail the way a Whisper model that isn't downloaded would.
-    var prepareFails = false
 
     var permissionQueries: Int { lock.withLock { queries } }
-    var prepareCalls: Int { lock.withLock { prepares } }
 
     func requiredPermissions(locale: Locale) async -> Set<PermissionKind> {
         lock.withLock { queries += 1 }
         return []
     }
 
-    func prepare(locale: Locale) async throws {
-        lock.withLock { prepares += 1 }
-        if prepareFails { throw SpeechError.whisperModelMissing(name: "base.en") }
-    }
+    func prepare(locale: Locale) async throws {}
 
     func transcribe(
         _ audio: AsyncThrowingStream<AudioChunk, any Error>,
@@ -465,28 +458,5 @@ struct VoiceSessionPrewarmTests {
         #expect(h.phase == .idle)
         #expect(await h.capture.startCount == 0)
         #expect(h.hud.events.isEmpty)
-    }
-
-    @Test("prewarming gets a Whisper model loaded ahead of the first command, and does so for no other engine")
-    func prewarmWhisper() async {
-        let recognizer = CountingRecognizer()
-        let h = SessionHarness(recognizer: recognizer)
-        await h.controller.prewarm()
-        #expect(recognizer.prepareCalls == 0, "the Apple engines are asked what they need, nothing more")
-
-        h.settings.current.speechEngine = .whisper
-        await h.controller.prewarm()
-        #expect(recognizer.prepareCalls == 1)
-    }
-
-    @Test("a Whisper model that isn't downloaded is not raised at launch: the person is told when they speak")
-    func prewarmWhisperMissing() async {
-        let recognizer = CountingRecognizer()
-        recognizer.prepareFails = true
-        let h = SessionHarness(recognizer: recognizer)
-        h.settings.current.speechEngine = .whisper
-        await h.controller.prewarm()
-        #expect(recognizer.prepareCalls == 1)
-        #expect(h.phase == .idle && h.hud.events.isEmpty)
     }
 }

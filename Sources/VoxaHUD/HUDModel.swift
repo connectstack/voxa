@@ -1,8 +1,11 @@
+import Foundation
 import Observation
 import VoxaCore
 
-/// What the HUD is showing.
+/// What the Voxa bar is showing below its field. (Once the HUD; the bar now carries everything Voxa has to say.)
 public enum HUDMode: Equatable, Sendable {
+    /// Nothing is going on: the bar is open, waiting for a command to be typed or said.
+    case idle
     /// The microphone is starting.
     case preparing
     case listening
@@ -22,7 +25,7 @@ public enum HUDMode: Equatable, Sendable {
     /// The agent's final reply.
     case reply(String)
 
-    /// Whether clicks must reach the HUD (a button is showing) rather than pass through it.
+    /// Whether clicks must reach the bar (a button is showing) rather than pass through it.
     public var isInteractive: Bool {
         switch self {
         case .error(let error): error.recovery != nil
@@ -31,27 +34,17 @@ public enum HUDMode: Equatable, Sendable {
         }
     }
 
-    /// Whether the microphone meter is meaningful in this mode.
-    var showsMeter: Bool {
+    /// Whether a command is being taken, carried out or asked about, so the bar must not take the keyboard: what the command types
+    /// and presses goes to the app in front, and a question must never be answered by a stray keystroke.
+    public var isInFlight: Bool {
         switch self {
-        case .preparing, .listening: true
-        default: false
+        case .preparing, .listening, .transcribing, .thinking, .acting, .confirm: true
+        case .idle, .result, .notice, .error, .reply: false
         }
     }
 
-    var showsTranscript: Bool {
-        switch self {
-        case .preparing, .listening, .transcribing, .result, .thinking, .acting: true
-        case .notice, .error, .confirm, .reply: false
-        }
-    }
-
-    var showsCancelHint: Bool {
-        switch self {
-        case .preparing, .listening, .transcribing, .thinking, .acting: true
-        default: false
-        }
-    }
+    /// Whether the field may be typed into: nothing is under way.
+    public var allowsTyping: Bool { !isInFlight }
 }
 
 /// What the user chose in a confirmation.
@@ -70,15 +63,15 @@ public enum AnswerStatus: Sendable, Equatable {
     case unclear
 }
 
-/// View state for the HUD. `@Observable` so SwiftUI re-renders only the views that read a changed property; the
+/// What the bar shows below its field. `@Observable` so SwiftUI re-renders only the views that read a changed property; the
 /// meter reads `levels` alone, so ~45 level updates per second never re-lay-out the transcript.
 @MainActor
 @Observable
 public final class HUDModel {
     /// Number of bars in the level meter.
-    public static let barCount = 28
+    public static let barCount = 80
 
-    public var mode: HUDMode = .preparing
+    public var mode: HUDMode = .idle
     public var transcript = ""
     public var isTranscriptFinal = false
     /// The push-to-talk shortcut, e.g. "⌥Space", shown in hints.
@@ -93,11 +86,41 @@ public final class HUDModel {
     @ObservationIgnored public var onRecovery: ((RecoveryAction) -> Void)?
     @ObservationIgnored public var onConfirmationChoice: ((ConfirmationChoice) -> Void)?
 
-    public init() {}
+    /// The least time between two bars of the meter, in seconds. The microphone reports its level about 45 times a second, and drawing
+    /// the meter that often is most of what the bar costs while it listens (which, for continuous listening, can be a long time).
+    @ObservationIgnored private let levelInterval: TimeInterval
+    @ObservationIgnored private let uptime: () -> TimeInterval
+    @ObservationIgnored private var lastBarAt = -TimeInterval.infinity
+    /// The loudest level since the last bar, so that a short sound between two bars isn't lost.
+    @ObservationIgnored private var loudest: Float = 0
+
+    /// - Parameters:
+    ///   - levelInterval: The least time between two bars of the meter; none by default, so that each level is a bar.
+    ///   - uptime: The time now, in seconds; a test brings its own.
+    public init(levelInterval: TimeInterval = 0, uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.levelInterval = levelInterval
+        self.uptime = uptime
+    }
+
+    /// A notice or an error that arrives with no command before it (nothing was heard) says its title where the command would be, so
+    /// the bar doesn't show an empty field above it.
+    var headline: String? {
+        guard transcript.isEmpty else { return nil }
+        switch mode {
+        case .notice(let title, _): return title
+        case .error(let error): return error.title
+        default: return nil
+        }
+    }
 
     public func push(level: AudioLevel) {
+        loudest = max(loudest, min(max(level.rms, 0), 1))
+        let now = uptime()
+        guard now - lastBarAt >= levelInterval else { return }
+        lastBarAt = now
         levels.removeFirst()
-        levels.append(level.rms)
+        levels.append(loudest)
+        loudest = 0
     }
 
     /// Clears everything tied to the previous command.
@@ -107,6 +130,8 @@ public final class HUDModel {
         confirmationKeysEnabled = false
         answerStatus = .idle
         levels = [Float](repeating: 0, count: Self.barCount)
+        loudest = 0
+        lastBarAt = -.infinity
     }
 }
 
@@ -131,3 +156,13 @@ public protocol HUDPresenting: AnyObject {
     /// Hides the HUD, immediately or after `delay`. Any later `show` cancels a pending hide.
     func hide(after delay: Duration?)
 }
+
+#if DEBUG
+extension HUDModel {
+    /// Puts a whole meter in place at once, for the debug states that show one (the meter is otherwise spaced out in time). Debug builds only.
+    public func debugFillMeter(_ newLevels: [Float]) {
+        let padded = [Float](repeating: 0, count: max(0, Self.barCount - newLevels.count)) + newLevels
+        levels = Array(padded.suffix(Self.barCount))
+    }
+}
+#endif

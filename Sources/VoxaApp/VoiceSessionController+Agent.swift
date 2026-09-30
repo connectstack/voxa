@@ -7,6 +7,7 @@ import VoxaHUD
 /// its reply (or its failure). Esc stops it at any point.
 extension VoiceSessionController {
     func startAgent(_ agent: any AgentRunning, command: String) {
+        onCommandStarted?()
         let token = UUID()
         agentToken = token
         agentStage = .thinking

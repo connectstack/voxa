@@ -8,7 +8,6 @@ let strict: [SwiftSetting] = [
 ]
 
 let keyboardShortcuts: Target.Dependency = .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")
-let whisperKit: Target.Dependency = .product(name: "WhisperKit", package: "WhisperKit")
 
 let package = Package(
     name: "Voxa",
@@ -23,10 +22,6 @@ let package = Package(
         // Global hotkey registration + recorder UI. Justification: robust Carbon hotkey handling, key-up events
         // for push-to-talk, layout-aware shortcut formatting and system-shortcut conflict detection.
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "3.1.0"),
-        // Whisper speech recognition, run on this Mac through Core ML. Justification: the spec names it as the optional local
-        // engine; it is the maintained Core ML port, and it is confined to one module (VoxaWhisper) so that nothing else
-        // depends on it and nothing is downloaded unless the person chooses a model in Settings.
-        .package(url: "https://github.com/argmaxinc/WhisperKit", from: "1.1.0"),
     ],
     targets: [
         // MARK: Shared kernel
@@ -35,8 +30,6 @@ let package = Package(
         // MARK: Capabilities (each depends only on VoxaCore)
         .target(name: "VoxaAudio", dependencies: ["VoxaCore"], swiftSettings: strict),
         .target(name: "VoxaSpeech", dependencies: ["VoxaCore"], swiftSettings: strict),
-        // The Whisper engine: the one module that carries the WhisperKit library.
-        .target(name: "VoxaWhisper", dependencies: ["VoxaCore", "VoxaSpeech", whisperKit], swiftSettings: strict),
         // Text to speech: speaking replies aloud with the system's voices.
         .target(name: "VoxaVoice", dependencies: ["VoxaCore"], swiftSettings: strict),
         .target(name: "VoxaPermissions", dependencies: ["VoxaCore"], swiftSettings: strict),
@@ -63,7 +56,7 @@ let package = Package(
         .target(
             name: "VoxaApp",
             dependencies: [
-                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaWhisper", "VoxaVoice", "VoxaPermissions", "VoxaHUD", "VoxaSettings",
+                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaVoice", "VoxaPermissions", "VoxaHUD", "VoxaSettings",
                 "VoxaAgent", "VoxaLLM", "VoxaPolicy", "VoxaTools",
                 keyboardShortcuts,
             ],
@@ -74,7 +67,7 @@ let package = Package(
         .executableTarget(
             name: "VoxaDev",
             dependencies: [
-                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaWhisper", "VoxaVoice", "VoxaPermissions", "VoxaHUD", "VoxaSettings",
+                "VoxaCore", "VoxaAudio", "VoxaSpeech", "VoxaVoice", "VoxaPermissions", "VoxaHUD", "VoxaSettings",
                 "VoxaAgent", "VoxaLLM", "VoxaPolicy", "VoxaTools",
             ],
             swiftSettings: strict
@@ -92,7 +85,6 @@ let package = Package(
         .testTarget(name: "VoxaCoreTests", dependencies: ["VoxaCore", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaAudioTests", dependencies: ["VoxaAudio", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaSpeechTests", dependencies: ["VoxaSpeech", "VoxaTestSupport"], swiftSettings: strict),
-        .testTarget(name: "VoxaWhisperTests", dependencies: ["VoxaWhisper", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaVoiceTests", dependencies: ["VoxaVoice", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaPermissionsTests", dependencies: ["VoxaPermissions", "VoxaTestSupport"], swiftSettings: strict),
         .testTarget(name: "VoxaHUDTests", dependencies: ["VoxaHUD", "VoxaTestSupport"], swiftSettings: strict),

@@ -28,6 +28,9 @@ public protocol HotkeyService: AnyObject {
 
     /// Human-readable form of the push-to-talk shortcut, e.g. "⌥Space". `nil` when none is configured.
     var pushToTalkDescription: String? { get }
+
+    /// One element each time the shortcut that opens the Voxa bar is pressed. A single consumer is expected.
+    var openBarPresses: AsyncStream<Void> { get }
 }
 
 /// Coarse app state shown by the menu-bar icon and read by the feedback layer.

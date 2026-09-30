@@ -12,7 +12,6 @@ import VoxaPolicy
 import VoxaSettings
 import VoxaSpeech
 import VoxaTools
-import VoxaWhisper
 
 // voxa-dev: developer tooling that exercises Voxa's building blocks without a person, a microphone or the full app.
 // It is not shipped inside Voxa.app.
@@ -21,19 +20,31 @@ let usage = """
     voxa-dev — Voxa developer tools
 
     USAGE
-      voxa-dev transcribe <audio-file> [--engine automatic|classic|analyzer|whisper] [--locale en_US] [--realtime]
-                          [--model base.en] [--download] [--whisper-folder DIR]
+      voxa-dev transcribe <audio-file> [--engine automatic|classic|analyzer] [--locale en_US] [--realtime]
           Runs a speech engine over a file, printing partial and final transcripts.
           Make a test clip with:  say -o /tmp/clip.aiff "open safari and search for swift concurrency"
-          The classic engine needs Speech Recognition permission for the launching app (e.g. Terminal).
-          The whisper engine needs a downloaded model (--model names one; see Settings → General). Nothing is fetched unless
-          you also pass --download, which downloads that model (tens to hundreds of megabytes, from huggingface.co) first.
+          The classic engine needs Speech Recognition permission for the launching app (e.g. Terminal); the analyzer engine
+          (macOS 26) does not.
+
+      voxa-dev vad <audio-file> [--lead 2] [--trail 2] [--repeat N --gap 2] [--level DB] [--noise rumble|white|hum[:DB]]
+                 [--background <audio-file> [--background-db DB]] [--save-dir DIR]
+          Runs the voice-activity detector (what hands-free listening uses to cut speech out of a microphone stream) over a
+          file with silence around it, and prints each utterance it finds and when. --noise and --background mix a fan, a hiss,
+          a hum or another recording under it, to see how it copes with a noisy room. --save-dir writes each utterance as a WAV.
+
+      voxa-dev handsfree <audio-file> [--engine automatic|classic|analyzer]
+                         [--lead 2] [--trail 2] [--repeat N --gap 2] [--level DB] [--noise rumble|white|hum[:DB]]
+                         [--background <audio-file> [--background-db DB]]
+          What continuous listening (the microphone button in the Voxa bar) would do with a recording, with the real speech engine: it
+          is cut into utterances, each is turned into text, and each that is words would be a command. Nothing is run. Shows how a
+          voice or a noisy room fares. (The classic engine needs Speech Recognition permission for the launching app; the analyzer
+          engine does not.)
 
       voxa-dev speech-status [--locale en_US]
           Read-only report of what each speech engine can do on this Mac (permissions, models). Downloads nothing.
 
       voxa-dev hud-snapshots <output-dir> [--scale 2]
-          Renders the HUD in every state, in light and dark appearance, to PNG files. Also renders the Settings window.
+          Renders the Voxa bar in every state, in light and dark appearance, to PNG files. Also renders the Settings window.
 
       voxa-dev system-prompt [--max-steps 12]
           Prints the agent system prompt exactly as it is sent.
@@ -78,28 +89,6 @@ func option(_ flag: String, in arguments: [String]) -> String? {
 
 // MARK: - transcribe
 
-/// The Whisper engine over the models folder (`--whisper-folder`, else Voxa's own), fetching the model first only when asked to.
-func makeWhisperRecognizer(_ arguments: [String], locale: Locale) async -> any SpeechRecognizer {
-    let id = option("--model", in: arguments) ?? WhisperModelCatalog.recommendedID(for: locale)
-    guard let model = WhisperModelCatalog.model(id) else {
-        fail("Unknown Whisper model '\(id)'. Use one of: \(WhisperModelCatalog.all.map(\.id).joined(separator: ", ")).")
-    }
-    let support = WhisperSupport(folder: option("--whisper-folder", in: arguments).map { URL(fileURLWithPath: $0) })
-    if arguments.contains("--download") {
-        print("downloading Whisper model \(model.id) (about \(model.approximateMegabytes) MB) from huggingface.co/argmaxinc/whisperkit-coreml …")
-        let progress = WhisperModelsModel.Progress(
-            downloading: { fraction in print(String(format: "  %3d%%", Int(fraction * 100))) },
-            preparing: { print("  preparing the model for this Mac (the first time takes a while)…") }
-        )
-        do {
-            try await support.modelActions.install(model.id, progress)
-        } catch {
-            fail("error: the model could not be downloaded: \(error.localizedDescription)")
-        }
-    }
-    return support.recognizer(for: AppSettings(speechEngine: .whisper, whisperModel: model.id))
-}
-
 func makeRecognizer(named name: String) -> any SpeechRecognizer {
     switch name {
     case "classic":
@@ -110,7 +99,7 @@ func makeRecognizer(named name: String) -> any SpeechRecognizer {
     case "automatic":
         return DefaultSpeechRecognizerProvider().recognizer(for: AppSettings(speechEngine: .appleAutomatic))
     default:
-        fail("Unknown engine '\(name)'. Use automatic, classic, analyzer or whisper.")
+        fail("Unknown engine '\(name)'. Use automatic, classic or analyzer.")
     }
 }
 
@@ -120,9 +109,7 @@ func transcribe(_ arguments: [String]) async {
     let locale = Locale(identifier: option("--locale", in: arguments) ?? AppSettings.systemLocaleIdentifier)
     let realTime = arguments.contains("--realtime")
 
-    let recognizer = engine == "whisper"
-        ? await makeWhisperRecognizer(arguments, locale: locale)
-        : makeRecognizer(named: engine)
+    let recognizer = makeRecognizer(named: engine)
     let capture = FileAudioCapture(url: URL(fileURLWithPath: path), realTime: realTime)
     print("engine: \(engine), locale: \(locale.identifier), file: \(path)")
 
@@ -162,10 +149,6 @@ func speechStatus(_ arguments: [String]) async {
     print("newer engine (SpeechAnalyzer, macOS 26+)")
     print("  readiness:           \(readiness)  (ready = model installed, needsDownload = supported but not installed)")
 
-    let whisperModels = await WhisperSupport().modelActions.installed()
-    print("Whisper (downloaded model)")
-    print("  models on this Mac:  \(whisperModels.isEmpty ? "none" : whisperModels.sorted().joined(separator: ", "))")
-
     let chosen = DefaultSpeechRecognizerProvider().recognizer(for: AppSettings(speechEngine: .appleAutomatic))
     let needs = await chosen.requiredPermissions(locale: locale)
     print(
@@ -190,6 +173,10 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "transcribe":
     await transcribe(Array(arguments.dropFirst()))
+case "vad":
+    await vad(Array(arguments.dropFirst()))
+case "handsfree":
+    await handsFree(Array(arguments.dropFirst()))
 case "speech-status":
     await speechStatus(Array(arguments.dropFirst()))
 case "hud-snapshots":

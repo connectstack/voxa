@@ -1,20 +1,21 @@
 # Voxa
 
 A voice-controlled automation agent for macOS. Hold a hotkey, speak a command, and Voxa carries it out on your Mac using
-an LLM with tool calling, then shows and speaks the result. It lives in the menu bar, listens only while you hold the
-key, and transcribes your voice on the Mac. The model can be Claude, OpenAI's GPT, or a model that runs on your own Mac
-through Ollama.
+an LLM with tool calling, then shows and speaks the result. You can also type a command, or click the microphone in the
+**Voxa bar** and let it listen continuously, and Siri can hand it a command too. It lives in the menu bar, listens only when
+you have asked it to (a held key, or a microphone you switched on), and transcribes your voice on the Mac. The model can be
+Claude, OpenAI's GPT, or a model that runs on your own Mac through Ollama.
 
 > **Status: milestone 4 of 5.** Hold the key, speak, and Voxa carries the command out with an LLM and tools for apps and
 > links, Shortcuts and AppleScript, your calendar and reminders, the clipboard, **other apps' windows (reading, clicking,
 > typing, shortcuts), screenshots and your files**, asking your permission for anything that isn't safe, and answering aloud.
-> **Whisper** is available as a speech engine that runs on your Mac. A welcome guide sets up permissions and the model on
+> A welcome guide sets up permissions and the model on
 > first launch, and Settings has a switch for every tool, a Permissions page and the history of what Voxa did. What is left
 > is hardening, signing and notarization (milestone 5). See [Roadmap](#roadmap).
 
 ## Requirements
 
-- macOS 14 or later (macOS 26 recommended: it enables Apple's newer speech engine and the Liquid Glass HUD)
+- macOS 14 or later (macOS 26 recommended: it enables Apple's newer speech engine and the Liquid Glass bar)
 - Xcode 26 / Swift 6.2 to build
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) only if you change `project.yml` (`brew install xcodegen`)
 - A Developer ID certificate only for signed, notarized distribution
@@ -32,7 +33,7 @@ Settings → General.) Or do it by hand:
 1. **Choose a model**: menu bar icon → **Settings…** → **Model** → pick a provider (see [Models](#models)) → paste its key
    → **Save**. Keys go into the macOS Keychain and nowhere else. (**Test connection** makes a tiny request to check it.
    Until a key is saved, a command answers *Add your OpenAI API key* (or Anthropic's) with a button that opens this page.)
-2. **Hold ⌥Space, speak, release.** The first time, macOS asks for Microphone and Speech Recognition access; the HUD
+2. **Hold ⌥Space, speak, release.** The first time, macOS asks for Microphone and Speech Recognition access; the bar
    explains anything that's missing and offers a button that opens the right System Settings pane.
 
 Try: *"open Notes"*, *"open apple.com"*, *"what's on my calendar today?"*, *"remind me to call the bank tomorrow at ten"*,
@@ -69,27 +70,60 @@ is identical for all three, so the safety rules don't depend on which one you us
 
 ## Speech engines
 
-**Settings → General → Speech recognition** offers three engines, all of which run on your Mac:
+**Settings → General → Speech recognition** offers two engines, both Apple's and both running on your Mac:
 
 | Engine | What it is |
 |--------|------------|
-| Automatic | Apple's newest engine when its language model is installed, otherwise the classic recognizer |
+| Automatic | Apple's newest engine (`SpeechAnalyzer`, macOS 26) when its language model is installed, otherwise the classic recognizer. Needs no Speech Recognition permission |
 | Classic | `SFSpeechRecognizer`, forced on-device |
-| **Whisper** | OpenAI's Whisper, run through Core ML ([WhisperKit](https://github.com/argmaxinc/WhisperKit)). It needs a model, which you download once |
 
-Choosing Whisper shows a list of models with their sizes: Tiny (about 80 MB, all languages), Base (about 150 MB, English or all
-languages) and Small (about 490 MB, English or all languages). **Nothing is downloaded until you press Download.** The models
-come from Hugging Face (`argmaxinc/whisperkit-coreml`); after the download Voxa prepares the model for your Mac's chip, which
-takes a minute the first time, and from then on Whisper works offline. Models are kept in
-`~/Library/Application Support/Voxa/Models/whisper` and **Remove** deletes one. Base (English) is a good start for English:
-quick enough for a spoken command and much better than Tiny at names and numbers; the multilingual ones follow the recognition
-language chosen above them.
+Your voice is never sent anywhere: if a language has no on-device model, Voxa says so instead of falling back to a server. Try an
+engine without the app: `swift run voxa-dev transcribe clip.aiff --engine analyzer` (make a clip with `say -o clip.aiff "open
+safari"`; the classic engine needs Speech Recognition permission for the terminal).
 
-While you hold the key Whisper shows a live guess about once a second (it re-reads everything heard so far), and the final text
-when you let go. Silence and noise are never sent to it, and the sound annotations it makes up (`[BLANK_AUDIO]`, `(music)`) are
-removed. It needs no Speech Recognition permission. If the model you chose isn't on the Mac, the command says so, with a button
-that opens Settings. Try it without the app: `swift run voxa-dev transcribe clip.aiff --engine whisper --model base.en --download`
-(the `--download` is what fetches the model).
+## The Voxa bar
+
+Open it with **⌥⇧Space** (change it in Settings → General → Voxa bar) or **Type or Talk to Voxa…** in the menu-bar menu. It is one
+glass card under the menu bar, like Siri's *Type to Siri*: Voxa's orb, a field, and a microphone. It doesn't bring the Voxa app to
+the front unless you type into it (so *"type hello"* still goes to the app you were working in).
+
+**It is also where every result appears.** The card opens out below the field for whatever Voxa has to say, so there is no second
+window to look for: your words as you say them with a live level, *Thinking…* and the name of each action as it runs, the reply, a
+problem with a button that fixes it, and the question that needs an answer (the whole script, the address, why Voxa is asking, and
+**Allow** / **Don't Allow**). The orb changes colour with what is going on: red while it listens, blue while it works, amber while it
+waits for you, green when it is done. Nothing in the bar moves by itself; the one live thing is a level meter that follows your voice.
+A command that came from the push-to-talk key, from Siri, or from your voice shows in the same bar and puts it away when it is over;
+one you opened yourself goes back to waiting for the next.
+
+- **Type** a command and press **Return**. It runs exactly like a spoken one. While you type, the bar has the keyboard (Voxa
+  becomes the active app); the moment a command starts it gives the keyboard back to the app you were in, because a command may
+  type or press keys there, and it takes neither typing nor clicks (except on a button of a question) while it only shows the
+  command. Open it while Voxa is busy and it says so.
+- **Click the microphone** and Voxa listens continuously. There is no wake phrase: *everything you say while the microphone is on is
+  taken as a command*, so switch it off when other people are talking or a video is playing. The bar stays on screen while it
+  listens, the menu-bar icon becomes an ear, and macOS shows its orange microphone dot. If full control is on the bar says so, in
+  orange: whatever is said then runs without asking.
+- The microphone is closed while a command runs or Voxa is speaking (so it never hears its own voice, and **nothing said aloud can
+  answer an Allow card**: that waits for a click, ⌘↩, or the push-to-talk key held), and it opens again about a second after
+  Voxa has finished.
+- It is **never a saved setting**: a Mac that restarts comes back with the microphone off. It also switches itself off after a
+  silence of ten minutes (Settings → General → Voxa bar → *Stop listening after*), and the bar says why.
+- Recognition is on this Mac, with the engine chosen in Settings. What it hears is turned into text and discarded; only commands
+  are kept, in History, like any other.
+
+Try continuous listening without the app: `swift run voxa-dev handsfree clip.aiff --engine analyzer` cuts a recording into
+utterances, transcribes each with the real engine, and prints what would be commands (add `--noise rumble:-40` or
+`--background other.aiff` to see how a noisy room fares). `voxa-dev vad clip.aiff` shows only where the speech starts and stops.
+
+## Siri
+
+Siri can do the listening for you. Say **"Hey Siri, ask Voxa"** (or *"Tell Voxa"*, *"Give Voxa a command"*); Siri asks *"What should
+Voxa do?"*, and what you answer is handed to Voxa as a command, exactly as if you had typed it. Siri does the listening and the
+speech recognition, so Voxa opens no microphone for it. It works once Voxa has been opened (macOS registers the phrases from the
+app), Siri must be switched on in System Settings, the Mac must be unlocked (the shortcut requires it), and the phrases can be
+renamed in the Shortcuts app, where it is called **Give Voxa a Command**. It is two steps because Apple's App Shortcuts only take
+fixed phrases; there is no way for Siri to pass "open Safari and search for cats" in the same breath as "ask Voxa". Voxa then
+runs the same agent, policy, refusals and Allow cards as for a typed command. If Voxa is busy, Siri says so.
 
 ## What Voxa can do
 
@@ -120,22 +154,26 @@ asking off, and the Safety section below says exactly what it changes.
 
 | You do | Voxa does |
 |--------|-----------|
-| Hold ⌥Space | HUD appears near the top of the screen: *Listening…*, a level meter and the live transcript |
-| Release | Records a fraction of a second more (so the last word isn't clipped), then *Transcribing…*, then *Thinking…* while the model works and the name of each action while it runs |
-| A risky action comes up | A card shows exactly what will happen (the whole script, the address, the app) and why Voxa is asking. **Allow** / **Don't Allow**, **⌘↩** to allow, or hold ⌥Space and say *yes* or *no*. Esc stops the whole command. No answer in 60 seconds counts as *no* |
+| Hold ⌥Space | The Voxa bar appears near the top of the screen: its orb turns red, your words appear in it as you say them, and a live level runs below |
+| Release | Records a fraction of a second more (so the last word isn't clipped), then *Transcribing…*, then *Thinking…* while the model works and the name of each action while it runs, all in the bar |
+| A risky action comes up | The bar opens out into a card that shows exactly what will happen (the whole script, the address, the app) and why Voxa is asking. **Allow** / **Don't Allow**, **⌘↩** to allow, or hold ⌥Space and say *yes* or *no*. Esc stops the whole command. No answer in 60 seconds counts as *no* |
 | The reply | A short answer stays up for a few seconds and is **read aloud** (switch it off in Settings → General → Voice). Holding ⌥Space or pressing Esc stops the speech at once. Hold ⌥Space within two minutes for a follow-up ("make it three hours") |
 | Tap the key briefly | A hint: *Hold ⌥Space while you speak*. Push-to-talk needs a hold |
+| Press ⌥⇧Space (or **Type or Talk to Voxa…** in the menu) | The **Voxa bar** opens under the menu bar: a field with *Type to Voxa*, and a microphone on its right. Type a command and press Return. Esc puts it away |
+| Click the microphone in the bar | **Continuous listening**: the microphone turns red and Voxa takes whatever you say as a command, one after another, with no key and no wake phrase. It lets go of the microphone while it works or speaks and picks up again after. Click the microphone again, press Esc, or close the bar to stop; it also stops by itself after a silence (Settings → General → Voxa bar, ten minutes by default) |
+| Say *"Hey Siri, ask Voxa"* | Siri asks *What should Voxa do?*; what you say next is handed to Voxa as a command (see [Siri](#siri)) |
 | Press Esc | Cancels the command at any point (listening, thinking, or waiting on a question) and dismisses; while a reply is showing, Esc dismisses it |
 | Say nothing | *I didn't catch that* |
 | Deny a permission | An error naming the permission with a button that opens System Settings |
 
-The HUD never steals focus from the app you're working in. Change the shortcut or the recognition language in
-**Settings…** (menu bar icon).
+Everything Voxa shows (what it heard, its progress, its reply, a problem, a question) is in the one bar, and it never steals focus
+from the app you're working in: it takes the keyboard only while you are typing into it. Change the shortcut or the recognition
+language in **Settings…** (menu bar icon).
 
 ## Project layout
 
 See [docs/DESIGN.md](docs/DESIGN.md) for the full design. In short: all logic is a Swift package of small modules
-(`VoxaCore`, `VoxaAudio`, `VoxaSpeech`, `VoxaWhisper`, `VoxaPermissions`, `VoxaHUD`, `VoxaSettings`, `VoxaLLM`, `VoxaPolicy`,
+(`VoxaCore`, `VoxaAudio`, `VoxaSpeech`, `VoxaPermissions`, `VoxaHUD`, `VoxaSettings`, `VoxaLLM`, `VoxaPolicy`,
 `VoxaTools`, `VoxaAgent`, `VoxaApp`); the Xcode project only wraps `VoxaApp` in an app bundle with the Info.plist, entitlements and signing.
 
 **From key press to recognized text**
@@ -148,7 +186,7 @@ sequenceDiagram
     participant P as Permissions
     participant M as MicrophoneCapture
     participant R as Speech recognizer
-    participant H as HUD
+    participant H as Voxa bar
     User->>HK: hold ⌥Space
     HK->>S: pressed
     S->>H: Getting ready…
@@ -175,7 +213,7 @@ sequenceDiagram
     participant A as AgentLoop
     participant M as Model (Anthropic API)
     participant P as PolicyEngine
-    participant C as Confirmation card
+    participant C as Question in the bar
     participant T as Tool
     S->>A: command (transcript)
     loop at most 12 turns
@@ -196,7 +234,7 @@ sequenceDiagram
         A->>M: tool results, in one message
     end
     A-->>S: reply
-    S-->>User: HUD shows the reply
+    S-->>User: the bar shows the reply
 ```
 
 ## Permissions
@@ -225,8 +263,12 @@ Voxa can act on your Mac, so the design assumes that anything it reads may be ho
 The policy engine is the security boundary (the app can't be sandboxed: Accessibility and Apple Events need it), and it is
 exhaustively tested. The rules, all in force in this milestone:
 
-- **Push-to-talk only.** The microphone is open only while the key is held; macOS shows its orange indicator meanwhile. A
-  spoken *yes* also needs the hold, so audio from a video or another voice can't approve anything.
+- **The microphone is open only because you asked.** Either you hold the push-to-talk key, or you clicked the microphone in the
+  Voxa bar. The second is never a saved setting, is shown by the bar, the menu-bar icon and macOS's orange dot, switches itself off
+  after a silence, and closes the moment the bar does. While it is on, *everything said is taken as a command*, which is the price:
+  someone else's voice, or a video, is one too (the policy, the refusals and the Allow cards still apply to what it says). And **a
+  voice can never approve anything**: the microphone is closed while a command runs, and an Allow card answers only to a click, ⌘↩
+  or the push-to-talk key held, which a video or another person can't press. Siri's hand-over is treated the same way.
 - **Only your spoken command is an instruction.** Script output, the screen, another app's controls, the clipboard, file names and web pages are *data*:
   it reaches the model wrapped in a random-boundary envelope, stripped of invisible characters, and can't close its own
   envelope. The system prompt tells the model to treat it as data.
@@ -311,10 +353,10 @@ exhaustively tested. The rules, all in force in this milestone:
 ## Development
 
 ```bash
-make test         # unit tests (1,165 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
+make test         # unit tests (over 1,200: includes real windows on the screen, a real osascript and a real speech voice)
 make lint         # SwiftLint
 make format       # SwiftFormat
-make snapshots    # render the HUD in every state, light and dark, to build/snapshots
+make snapshots    # render the Voxa bar in every state, light and dark, to build/snapshots
 ```
 
 A few suites drive real windows (the Accessibility, window-list and screenshot code, each on a window of the test's own, so
@@ -329,6 +371,8 @@ allowed for whatever runs the tests (Terminal, Xcode); otherwise they are skippe
 say -o /tmp/clip.aiff "open safari and search for swift concurrency"
 swift run voxa-dev speech-status                       # what each speech engine can do on this Mac (downloads nothing)
 swift run voxa-dev transcribe /tmp/clip.aiff           # run an engine over a file
+swift run voxa-dev vad /tmp/clip.aiff --noise rumble:-40    # where speech starts and stops in a recording, with a fan under it
+swift run voxa-dev handsfree /tmp/clip.aiff --engine analyzer   # what continuous listening would take as commands (real engine)
 swift run voxa-dev system-prompt                       # print the agent system prompt exactly as sent
 swift run voxa-dev ask "open example dot com" --dry-run  # a typed command through the real model client, agent loop and tools
 swift run voxa-dev ask "open safari" --provider openai --dry-run                    # …with OpenAI ($OPENAI_API_KEY)
@@ -357,7 +401,7 @@ confirmation), `inject` (a script whose output tries to redirect the model), `sh
 `shot click`, `trash screenshots` and the other window, screenshot and file commands (see its header), `unauthorized`,
 `quota`, `overloaded`, `cutoff`, `refuse`, `slow`. It pretends to have four Ollama models, one of which can't use tools.
 
-Two scripts run the real Debug app against it, with settings in a throwaway preferences domain (yours are untouched) and
+Three scripts run the real Debug app against it, with settings in a throwaway preferences domain (yours are untouched) and
 no system prompt ever appearing:
 
 ```bash
@@ -366,16 +410,20 @@ scripts/e2e-providers.sh      # Claude, OpenAI and Ollama: a confirmation, the a
 scripts/e2e-tools.sh          # calendar, reminders, clipboard and context tools on sample data, another app's window, screenshots
                               # and files (a pretend Safari and a pretend disk), a page and a file name with a hidden
                               # instruction, the permission gate, spoken replies (one short sentence is said aloud), the walkthrough
+scripts/e2e-bar.sh            # the Voxa bar: typing a command, the microphone button (continuous listening, played from a clip),
+                              # that a voice can't approve an Allow card, the idle switch-off, and Siri's hand-over
 ```
 
-To try a build without disturbing the Voxa you are using, build it somewhere else and point the scripts at it:
+**Build somewhere of your own first.** `scripts/build.sh` writes to `build/DerivedData`, which is where `make run` and
+`make run-signed` put the Voxa you are using, and would replace it (a signed build with an ad-hoc one, so macOS forgets its
+permissions):
 
 ```bash
 DERIVED_DATA=/tmp/voxa-e2e scripts/build.sh && DERIVED_DATA=/tmp/voxa-e2e scripts/e2e-tools.sh
 ```
 
-The test copy listens to notifications carrying a private suffix (`VOXA_DEBUG_HOOK_SUFFIX`), and the scripts only ever stop the
-copy they started, so the Voxa you are using neither hears them nor is stopped.
+The scripts run a **private copy** of the app they are given, in a temporary folder, and only ever stop that copy. It listens to
+notifications carrying a private suffix (`VOXA_DEBUG_HOOK_SUFFIX`), so the Voxa you are using neither hears them nor is stopped.
 
 `e2e-tools.sh` uses two Debug-only variables: `VOXA_DEBUG_SAMPLE_DATA=1` (or `hostile`, which adds an event, a page and a file
 name that try to steer the model) makes the tools use made-up data (a pretend Safari to click in, a pretend disk), and
@@ -383,7 +431,7 @@ name that try to steer the model) makes the tools use made-up data (a pretend Sa
 
 ### Debug builds
 
-Debug builds add a **Debug: preview HUD** submenu, and the app listens for Darwin notifications so the HUD and windows can
+Debug builds add a **Debug: preview bar** submenu, and the app listens for Darwin notifications so the bar and windows can
 be driven from a shell (no microphone, no key press):
 
 ```bash
@@ -405,7 +453,14 @@ open -n --env VOXA_ANTHROPIC_BASE_URL=http://127.0.0.1:8899 --env VOXA_DEBUG_API
 echo "add numbers" > /tmp/cmd.txt; notifyutil -p com.rohitsainier.voxa.debug.ask     # submit the command
 notifyutil -p com.rohitsainier.voxa.debug.key.allow      # ⌘Return   (also: key.escape, button.allow, button.deny, button.recovery, answer.yes / no / unclear)
 notifyutil -p com.rohitsainier.voxa.debug.report; cat /tmp/report.txt                # status, which keys are captured, permissions
+notifyutil -p com.rohitsainier.voxa.debug.bar.show       # the Voxa bar (also: bar.hide = Esc, bar.mic = the microphone button,
+                                                         #   bar.type / bar.fill = type the text in $VOXA_DEBUG_COMMAND_FILE, with / without Return)
+notifyutil -p com.rohitsainier.voxa.debug.siri           # hand the text in that file over as Siri's shortcut does
 ```
+
+Continuous listening can be tried without a microphone: launch with `VOXA_DEBUG_HANDSFREE_AUDIO=clip.wav` (a 16 kHz clip, played
+once in real time in place of the microphone, then silence) and `VOXA_DEBUG_HANDSFREE_TRANSCRIPTS="first|second"` (what the
+recognizer says for the first, second… utterance), then press the bar's microphone with `bar.mic`. `scripts/e2e-bar.sh` does this.
 
 `VOXA_DEBUG_DEFAULTS_SUITE` keeps the app's settings in a separate preferences domain (write the provider, model and address
 there instead of clicking through Settings; `scripts/e2e-providers.sh` shows how). OpenAI's and Ollama's addresses are
@@ -454,16 +509,16 @@ a real API key:
 
 - [ ] Launch: a microphone icon appears in the menu bar; the menu reads "Ready — hold ⌥Space to talk".
 - [ ] First press: the Microphone prompt appears; after Allow, and the Speech Recognition prompt, holding ⌥Space works.
-      (If you released the key while a prompt was up, the HUD says *You're all set*.)
-- [ ] Hold and speak: the HUD shows *Listening…*, the meter moves with your voice, words appear live.
-- [ ] Release: *Transcribing…*, then *Heard* with the final text; the HUD fades out after about three seconds.
-- [ ] Quick tap: the HUD says *Hold the shortcut while you speak*, then fades; no error, and no orange microphone dot left behind.
-- [ ] Esc while listening: the HUD disappears and the orange microphone dot goes away immediately.
-- [ ] Esc while a result is showing: dismisses it. Esc elsewhere, when no HUD is showing, still reaches your app.
+      (If you released the key while a prompt was up, the bar says *You're all set*.)
+- [ ] Hold and speak: the bar shows *Listening…*, the meter moves with your voice, words appear live.
+- [ ] Release: *Transcribing…*, then *Heard* with the final text; the bar fades out after about three seconds.
+- [ ] Quick tap: the bar says *Hold the shortcut while you speak*, then fades; no error, and no orange microphone dot left behind.
+- [ ] Esc while listening: the bar disappears and the orange microphone dot goes away immediately.
+- [ ] Esc while a result is showing: dismisses it. Esc elsewhere, when the bar isn't showing, still reaches your app.
 - [ ] Say nothing: *I didn't catch that*.
 - [ ] Deny Microphone in System Settings, then press: an error with **Open System Settings** that opens the Microphone pane.
-- [ ] Focus: keep typing in another app while the HUD shows; the app stays active and no keystroke is lost.
-- [ ] A full-screen app: the HUD still appears over it. Two displays: it appears on the one with the pointer.
+- [ ] Focus: keep typing in another app while the bar shows; the app stays active and no keystroke is lost.
+- [ ] A full-screen app: the bar still appears over it. Two displays: it appears on the one with the pointer.
 - [ ] Light and dark mode; VoiceOver announces *Listening* and the recognized command.
 - [ ] Settings: opens without a crash (repeatedly); changing the shortcut takes effect and the menu label follows.
 - [ ] AirPods or another Bluetooth mic: connect one, press, speak; the command survives the audio format switch.
@@ -475,7 +530,7 @@ a real API key:
 
 - [ ] Settings → Model: paste a key, Save (the field clears, "A key is saved in your Keychain"), **Test connection** says
       *Connected*. Remove it: the next command says *Add your Anthropic API key* with a working button.
-- [ ] *"Open Notes"* opens Notes, the HUD shows *Thinking…*, then *Open Notes*, then a short reply. No question is asked.
+- [ ] *"Open Notes"* opens Notes, the bar shows *Thinking…*, then *Open Notes*, then a short reply. No question is asked.
 - [ ] *"Open apple.com"* opens the page in your default browser. *"Open apple.com in Safari"* uses Safari.
 - [ ] *"Run an AppleScript that returns 6 times 7"*: a card shows the whole script and **Allow / Don't Allow**. Allow → the reply
       says 42. Try each way to answer: click, **⌘↩**, and hold ⌥Space and say *yes* (and once *no*, and once something unclear).
@@ -484,7 +539,7 @@ a real API key:
 - [ ] *"Use AppleScript to tell Finder to activate"*: macOS asks for **Automation** permission for the first time, naming Voxa.
       After Allow, the script runs; after Don't Allow, the reply explains it needs the permission.
 - [ ] Ask for something impossible ("run a shell command"): a plain refusal, never a prompt.
-- [ ] Esc while *Thinking…*, while a script runs and while a card is up: each stops the command and clears the HUD at once.
+- [ ] Esc while *Thinking…*, while a script runs and while a card is up: each stops the command and clears the bar at once.
 - [ ] A follow-up within two minutes ("and open Safari too") knows what came before; after two minutes it doesn't.
 - [ ] Turn Wi-Fi off and ask for something: *You appear to be offline*, no hang. Turn it on again: the next command works.
 - [ ] Settings → Safety → *For every change*: even *"open Notes"* now asks first.
@@ -516,9 +571,38 @@ granted Accessibility permission: the automated checks use sample data and scrip
 - [ ] Settings → History: your commands appear with what happened; search finds one; *Show in Finder* reveals the file; *Clear
       History…* asks, then empties it.
 
-**Milestone 4: needs your Mac, Accessibility, Screen Recording and a Whisper download** (nothing below has been run against a real
-app's window, real synthetic input, a real screen capture of your apps, real files in your folders, or a downloaded Whisper model:
-the automated checks use a pretend desktop, a pretend disk and a made-up model. The real screenshot code was run once, on a
+**The Voxa bar, continuous listening and Siri: need you and your voice** (the automated checks type into the bar, play a recording
+in place of the microphone with a scripted recognizer, and call the code Siri's shortcut calls; real speech was only checked with
+`voxa-dev handsfree` on generated speech, and the real bar was only seen in a private copy of the app and in screenshots)
+
+- [ ] Press **⌥⇧Space**: the bar opens under the menu bar with the cursor in it. Type *"what's on my calendar today"* and press Return: it
+      runs, and its progress and reply appear in the same bar, which puts itself away afterwards. Esc puts an open bar away. Click on
+      another app while it is open: it closes. *"Type hello"* typed in the bar goes to the app that was in front, not to the bar.
+- [ ] Everything is in the one bar: hold ⌥Space and speak (your words appear in the bar's field as you say them, with a level meter below),
+      release (*Transcribing…*, *Thinking…*, the reply), and ask for something that needs an Allow card (the card opens out of the bar;
+      clicking **Allow** works, and typing meanwhile still goes to the app in front, never into the bar). There is no second window.
+- [ ] Press **⌥⇧Space** while a command is running: the bar says Voxa is busy instead of taking the keyboard, and the command carries on.
+- [ ] Look at the bar in light and dark appearance, on a bright and a dark wallpaper, and with *Reduce transparency* on: the text is
+      readable everywhere.
+- [ ] Menu bar → **Type or Talk to Voxa…** does the same. ⌘V pastes into the field; ⌘A, ⌘C, ⌘X and ⌘Z work.
+- [ ] Click the **microphone** in the bar: it turns red, the bar says it is listening, the menu-bar icon becomes an ear, macOS shows
+      its orange dot. Say *"open Notes"*: the microphone lets go while Voxa works and speaks, then listens again; say another
+      command without touching anything. Watch that a cough or a sigh doesn't start a command.
+- [ ] With the microphone on, ask for something that needs an Allow card (*"delete the file called test"* in a scratch folder): the card
+      appears and **saying "yes" does nothing** (the microphone is closed); click Allow or press ⌘↩.
+- [ ] Turn full control on (Settings → Safety) and click the microphone: the bar shows the orange warning line.
+- [ ] Click the microphone again, press Esc, or press ⌥⇧Space: listening stops and the dot disappears. Quit and reopen Voxa: the
+      microphone is off. Leave it on and silent for ten minutes (or set *Stop listening after* to 5): it stops and the bar says so.
+- [ ] Deny the microphone in System Settings and click the microphone in the bar: the bar says why, with the microphone crossed
+      out; allow it and it starts by itself within a few seconds.
+- [ ] With another app playing speech, the microphone on: what it takes is whatever it hears. (Expect false commands; this is the
+      reason to switch it off when others are talking.)
+- [ ] **Siri:** open Voxa once, then say *"Hey Siri, ask Voxa"*, then a command. Siri asks what to do and Voxa runs it. In the Shortcuts
+      app, *Voxa → Give Voxa a Command* is there. With the Mac locked, Siri refuses. While a command runs, Siri says Voxa is busy.
+
+**Milestone 4: needs your Mac, Accessibility and Screen Recording** (nothing below has been run against a real
+app's window, real synthetic input, a real screen capture of your apps, or real files in your folders:
+the automated checks use a pretend desktop and a pretend disk. The real screenshot code was run once, on a
 window of its own. Use `make run-signed` so the Accessibility grant survives rebuilds.)
 
 - [ ] Settings → Permissions: press **Allow…** on Accessibility and switch Voxa on in System Settings; the row turns green
@@ -541,12 +625,6 @@ window of its own. Use `make run-signed` so the Accessibility grant survives reb
 - [ ] *"Move the file called … to my Documents folder"*: macOS may first ask to let Voxa into that folder; then the card lists what
       goes where, and after Allow the file moves. A name that is already taken stops it. *"Trash the … files"* asks with the list,
       the files land in the Trash, and **Put Back** returns them. *"Delete my .ssh folder"* is refused without a question.
-- [ ] Settings → General → Speech recognition → Whisper: the model list appears with sizes. Download **Base (English)**: progress
-      shows, then *Getting it ready for this Mac (once)…*, then *Ready*; **Use this one** if it isn't already in use. Hold ⌥Space
-      and speak: text appears while you talk and the command works. Quit and reopen: the first command after launch is quick.
-- [ ] Turn Wi-Fi off after the model is ready: Whisper still works. **Remove** the model: the next command says the model isn't
-      downloaded, with a button that opens Settings. Cancel a download part-way: it stops, and Download carries on from there.
-- [ ] Say nothing while Whisper is on: *I didn't catch that*, never invented words such as "Thank you for watching".
 - [ ] (Ollama) With a model that can't see images, ask for a screenshot: the model is told it can't, and says so in its reply.
 
 **Full control: needs you to click (nothing here has been clicked by anyone but a test)**
@@ -555,7 +633,7 @@ window of its own. Use `make run-signed` so the Accessibility grant survives reb
       Control** and **Keep Asking**. Keep Asking (or Esc) leaves the switch off. Give Full Control turns it on, and the *Ask before
       acting* picker greys out.
 - [ ] With it on, the menu-bar menu has **Full control is on** and **Turn Off Full Control**; the Tools tab shows an orange note.
-- [ ] *"Trash the … files"* (or *"move the file called …"*) now goes straight through, with no card; the HUD still shows what it is
+- [ ] *"Trash the … files"* (or *"move the file called …"*) now goes straight through, with no card; the bar still shows what it is
       doing. Settings → History says *ran without asking (full control)* for it.
 - [ ] *"Run an AppleScript that returns 6 times 7"* now runs with no card and answers 42, and History says *ran without asking*.
       In System Settings, *"click Privacy & Security"* goes straight through too.
@@ -594,7 +672,7 @@ window of its own. Use `make run-signed` so the Accessibility grant survives reb
 | M1 | Menu-bar shell, hotkey, audio capture, Apple STT, HUD with live transcript | done |
 | M2 | LLM client + agent loop, `open_app` / `open_url` / `run_shortcut` / `run_applescript`, policy engine, confirmation HUD | done |
 | M3 | Permissions manager + welcome guide, calendar / reminders / clipboard / context tools, spoken replies, full settings, history viewer | done |
-| M4 | Accessibility UI tools, screenshot + vision fallback, file tools, WhisperKit engine | done |
+| M4 | Accessibility UI tools, screenshot + vision fallback, file tools | done |
 | M5 | Hardening, signing and notarization scripts, DMG, final docs | next |
 
 ## License

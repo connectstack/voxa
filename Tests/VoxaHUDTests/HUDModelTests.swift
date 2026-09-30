@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 import Testing
 import VoxaCore
 @testable import VoxaHUD
@@ -18,6 +18,42 @@ struct HUDModelTests {
         #expect(model.levels.count == HUDModel.barCount)
         #expect(model.levels.last == Float(HUDModel.barCount + 5) / 100)
         #expect(model.levels.first == Float(6) / 100)  // the five oldest scrolled off
+    }
+
+    @Test("with a least time between bars, the levels in between become the next bar as the loudest of them, so a short sound isn't lost")
+    func levelsAreSpacedOut() {
+        var now: TimeInterval = 100
+        let model = HUDModel(levelInterval: 0.1, uptime: { now })
+        model.push(level: AudioLevel(rms: 0.2, peak: 1))
+        #expect(model.levels.last == 0.2, "the first level is a bar at once")
+
+        for level: Float in [0.3, 0.9, 0.4] {
+            now += 0.02
+            model.push(level: AudioLevel(rms: level, peak: 1))
+        }
+        #expect(model.levels.last == 0.2, "not long enough since the last bar")
+
+        now += 0.05
+        model.push(level: AudioLevel(rms: 0.1, peak: 1))
+        #expect(model.levels.last == 0.9, "the next bar is the loudest since the last")
+        #expect(model.levels.suffix(3) == [0, 0.2, 0.9])
+    }
+
+    @Test("starting a new command starts the meter's spacing afresh")
+    func spacingIsResetWithTheSession() {
+        let model = HUDModel(levelInterval: 1, uptime: { 5 })
+        model.push(level: AudioLevel(rms: 0.5, peak: 1))
+        model.resetSession()
+        model.push(level: AudioLevel(rms: 0.7, peak: 1))
+        #expect(model.levels.last == 0.7, "no need to wait out the last command's interval")
+    }
+
+    @Test("a loudness outside 0 to 1 is kept inside it")
+    func levelIsClamped() {
+        let model = HUDModel()
+        model.push(level: AudioLevel(rms: 7, peak: 9))
+        model.push(level: AudioLevel(rms: -1, peak: 0))
+        #expect(Array(model.levels.suffix(2)) == [1, 0])
     }
 
     @Test("starting a new command clears the previous transcript and meter but keeps the hint")
@@ -61,20 +97,36 @@ struct HUDModelTests {
         #expect(HUDMode.error(UserFacingError(title: "t", detail: "d", recovery: .openAppSettings)).isInteractive)
     }
 
-    @Test("each mode shows the right parts")
-    func sections() {
-        #expect(HUDMode.listening.showsMeter && HUDMode.listening.showsTranscript && HUDMode.listening.showsCancelHint)
-        #expect(!HUDMode.transcribing.showsMeter && HUDMode.transcribing.showsCancelHint)
-        #expect(HUDMode.result("x").showsTranscript && !HUDMode.result("x").showsCancelHint)
-        #expect(!HUDMode.notice(title: "t", detail: nil).showsTranscript)
-        #expect(!HUDMode.error(UserFacingError(title: "t", detail: "d")).showsTranscript)
-
-        // The agent's stages keep the command on screen; the question and the reply stand alone.
-        for mode in [HUDMode.thinking(partial: nil), .acting(title: "Open Safari")] {
-            #expect(mode.showsTranscript && mode.showsCancelHint && !mode.showsMeter)
+    @Test("a command being taken, carried out or asked about is in flight, and nothing can be typed then")
+    func inFlight() {
+        let inFlight: [HUDMode] = [
+            .preparing, .listening, .transcribing, .thinking(partial: nil), .acting(title: "Open Safari"), .confirm(sensitivePrompt),
+        ]
+        for mode in inFlight {
+            #expect(mode.isInFlight && !mode.allowsTyping, "\(mode)")
         }
-        for mode in [HUDMode.confirm(sensitivePrompt), .reply("Done.")] {
-            #expect(!mode.showsTranscript && !mode.showsCancelHint && !mode.showsMeter)
+        let finished: [HUDMode] = [
+            .idle, .result("x"), .notice(title: "t", detail: nil), .error(UserFacingError(title: "t", detail: "d")), .reply("Done."),
+        ]
+        for mode in finished {
+            #expect(!mode.isInFlight && mode.allowsTyping, "\(mode)")
+        }
+    }
+
+    @Test("a notice or error with no command before it says its title where the command would be; with one, it doesn't")
+    func headline() {
+        let model = HUDModel()
+        model.mode = .notice(title: "I didn't catch that", detail: "Try again.")
+        #expect(model.headline == "I didn't catch that")
+        model.mode = .error(UserFacingError(title: "Microphone access is off", detail: "d"))
+        #expect(model.headline == "Microphone access is off")
+
+        model.transcript = "open Safari"
+        #expect(model.headline == nil, "the command is what the row says then")
+        model.transcript = ""
+        for mode in [HUDMode.idle, .listening, .thinking(partial: nil), .reply("Done.")] {
+            model.mode = mode
+            #expect(model.headline == nil, "\(mode)")
         }
     }
 
@@ -86,104 +138,5 @@ struct HUDModelTests {
         model.resetSession()
         #expect(!model.confirmationKeysEnabled)
         #expect(model.answerStatus == .idle)
-    }
-}
-
-@MainActor
-@Suite("HUDView rendering")
-struct HUDViewRenderingTests {
-    private func model(for mode: HUDMode) -> HUDModel {
-        let model = HUDModel()
-        model.mode = mode
-        model.hotkeyHint = "⌥Space"
-        model.transcript = "Set a timer for five minutes and remind me to stretch afterwards"
-        for step in 0..<HUDModel.barCount {
-            model.push(level: AudioLevel(rms: Float(step % 7) / 8, peak: 1))
-        }
-        return model
-    }
-
-    @Test(
-        "every mode renders at the HUD's fixed width with a sensible height",
-        arguments: [
-            HUDMode.preparing,
-            .listening,
-            .transcribing,
-            .result("Set a timer"),
-            .notice(title: "I didn't catch that", detail: "Hold ⌥Space and speak, then release."),
-            .error(
-                UserFacingError(
-                    title: "Microphone access is off",
-                    detail: "Turn it on in System Settings.",
-                    recovery: .openSystemSettings(.microphone)
-                )
-            ),
-            .thinking(partial: nil),
-            .thinking(partial: "Let me open Safari for you."),
-            .acting(title: "Open Safari"),
-            .reply("Opened Safari and searched for Swift concurrency."),
-            .confirm(
-                ConfirmationPrompt(
-                    toolName: "run_applescript",
-                    title: "Run an AppleScript",
-                    summary: "Runs a script that controls Finder.",
-                    details: [
-                        DetailRow("Script", "tell application \"Finder\"\n  activate\nend tell", style: .code),
-                        DetailRow("Controls", "Finder"),
-                    ],
-                    targetApp: "Finder",
-                    risk: .sensitive,
-                    reasons: [
-                        "AppleScript can control other apps.",
-                        "Types keystrokes or presses keys in whichever app is in front",
-                    ]
-                )
-            ),
-            .confirm(
-                ConfirmationPrompt(
-                    toolName: "open_url",
-                    title: "Open example.com",
-                    summary: "Opens example.com in your default app.",
-                    details: [
-                        DetailRow("Site", "example.com"),
-                        DetailRow("Address", "https://example.com/a?b=c", style: .url),
-                    ],
-                    risk: .reversible,
-                    reasons: [
-                        "Voxa read content from outside your command (clipboard), so it is double-checking before it acts."
-                    ]
-                )
-            ),
-        ]
-    )
-    func rendersEveryMode(mode: HUDMode) throws {
-        let renderer = ImageRenderer(content: HUDView(model: model(for: mode)))
-        renderer.scale = 2
-        let image = try #require(renderer.cgImage)
-        #expect(image.width == 880, "expected a 440 pt wide HUD at 2x, got \(image.width) px")
-        #expect((100...1_400).contains(image.height), "unexpected height \(image.height) px")
-    }
-
-    @Test(
-        "a confirmation is taller than the plain states because it carries the details, but stays bounded for a huge script"
-    )
-    func confirmationHeight() throws {
-        func height(of script: String) throws -> Int {
-            let prompt = ConfirmationPrompt(
-                toolName: "run_applescript",
-                title: "Run an AppleScript",
-                summary: "Runs a script.",
-                details: [DetailRow("Script", script, style: .code)],
-                risk: .sensitive,
-                reasons: ["AppleScript can control other apps."]
-            )
-            let renderer = ImageRenderer(content: HUDView(model: model(for: .confirm(prompt))))
-            renderer.scale = 2
-            return try #require(renderer.cgImage).height
-        }
-        let short = try height(of: "beep")
-        let huge = try height(of: String(repeating: "display dialog \"hello world\"\n", count: 200))
-        #expect(huge < 2 * 700, "a huge script scrolls inside the card instead of growing it; got \(huge) px")
-        #expect(huge >= short)
     }
 }

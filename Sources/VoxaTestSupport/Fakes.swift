@@ -104,6 +104,7 @@ public final class FakeSettings: SettingsProviding {
 @MainActor
 public final class FakeHotkeyService: HotkeyService {
     public let pushToTalk: AsyncStream<PushToTalkEvent>
+    public let openBarPresses: AsyncStream<Void>
     public var pushToTalkDescription: String? = "⌥Space"
     /// How many Esc listeners are registered right now (Esc must only be captured while a session needs it).
     public private(set) var activeCancelListeners = 0
@@ -111,12 +112,17 @@ public final class FakeHotkeyService: HotkeyService {
     public private(set) var activeAllowListeners = 0
 
     private let continuation: AsyncStream<PushToTalkEvent>.Continuation
+    private let openBarContinuation: AsyncStream<Void>.Continuation
     private var cancelContinuations: [UUID: AsyncStream<Void>.Continuation] = [:]
     private var allowContinuations: [UUID: AsyncStream<Void>.Continuation] = [:]
 
     public init() {
         (pushToTalk, continuation) = AsyncStream<PushToTalkEvent>.makeStream()
+        (openBarPresses, openBarContinuation) = AsyncStream<Void>.makeStream()
     }
+
+    /// The shortcut that opens the Voxa bar is pressed.
+    public func pressOpenBar() { openBarContinuation.yield() }
 
     public func press() { continuation.yield(.pressed) }
     public func release() { continuation.yield(.released) }

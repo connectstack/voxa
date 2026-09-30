@@ -3,7 +3,7 @@ import Foundation
 
 /// A slice of microphone audio in the canonical capture format: mono, Float32, 16 kHz.
 ///
-/// 16 kHz is Whisper's native rate and is plenty for Apple's recognizers, so one format serves every
+/// 16 kHz is plenty for Apple's recognizers, so one format serves every
 /// speech engine. Chunks are plain value types so they cross concurrency domains freely.
 public struct AudioChunk: Sendable, Equatable {
     public static let canonicalSampleRate: Double = 16_000

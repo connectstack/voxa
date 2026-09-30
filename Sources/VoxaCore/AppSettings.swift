@@ -6,8 +6,6 @@ public enum SpeechEngineKind: String, Codable, CaseIterable, Sendable, Identifia
     case appleAutomatic
     /// `SFSpeechRecognizer`, forced to on-device recognition.
     case appleClassic
-    /// OpenAI's Whisper, run on this Mac through Core ML. Needs a model downloaded first (Settings → General).
-    case whisper
 
     public var id: String { rawValue }
 }
@@ -45,6 +43,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// faster starts to blur.
     public static let defaultSpeechRate = 0.5
     public static let speechRateRange: ClosedRange<Double> = 0.3...0.7
+    /// How long continuous listening (the microphone button in the Voxa bar) may go with nothing said before it lets the microphone
+    /// go, in minutes. Zero means it never does.
+    public static let defaultListeningIdleMinutes = 10
+    public static let listeningIdleMinutesRange = 0...240
 
     /// The user's language and region as a plain `language_REGION` identifier (e.g. `en_IN`), without the calendar
     /// and region-override extensions that `Locale.current.identifier` can carry and speech engines reject.
@@ -68,8 +70,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Whether the automatic speech engine may download Apple's newer on-device model in the background. Until it has
     /// finished (or if this is off) the classic on-device recognizer is used.
     public var downloadSpeechModel: Bool
-    /// Which Whisper model to use when `speechEngine` is `.whisper`: an `id` from `WhisperModelCatalog`.
-    public var whisperModel: String
 
     // MARK: Agent
 
@@ -103,6 +103,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// How fast replies are spoken, in `AVSpeechUtterance`'s units (`speechRateRange`).
     public var speechRate: Double
 
+    // MARK: Listening
+
+    /// Continuous listening is switched on for a while by the person (the microphone button in the Voxa bar), never by a setting:
+    /// it keeps the microphone open and takes what it hears as commands. This is only how long it may go with nothing said before
+    /// it switches itself off, in minutes (zero: never).
+    public var listeningIdleMinutes: Int
+
     // MARK: Safety
 
     public var confirmationStrictness: ConfirmationStrictness
@@ -127,7 +134,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         localeIdentifier: String = AppSettings.systemLocaleIdentifier,
         maxRecordingSeconds: Int = AppSettings.defaultMaxRecordingSeconds,
         downloadSpeechModel: Bool = true,
-        whisperModel: String = WhisperModelCatalog.defaultID,
         provider: ModelProvider = .anthropic,
         model: String = AppSettings.defaultModel,
         openAIModel: String = AppSettings.defaultOpenAIModel,
@@ -142,6 +148,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         speakReplies: Bool = true,
         voiceIdentifier: String = "",
         speechRate: Double = AppSettings.defaultSpeechRate,
+        listeningIdleMinutes: Int = AppSettings.defaultListeningIdleMinutes,
         confirmationStrictness: ConfirmationStrictness = .standard,
         fullControl: Bool = false,
         verifyCompletion: Bool = true,
@@ -153,7 +160,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.localeIdentifier = localeIdentifier
         self.maxRecordingSeconds = maxRecordingSeconds
         self.downloadSpeechModel = downloadSpeechModel
-        self.whisperModel = whisperModel
         self.provider = provider
         self.model = model
         self.openAIModel = openAIModel
@@ -168,6 +174,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.speakReplies = speakReplies
         self.voiceIdentifier = voiceIdentifier
         self.speechRate = speechRate
+        self.listeningIdleMinutes = listeningIdleMinutes
         self.confirmationStrictness = confirmationStrictness
         self.fullControl = fullControl
         self.verifyCompletion = verifyCompletion
@@ -179,10 +186,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case settingsVersion
-        case speechEngine, localeIdentifier, maxRecordingSeconds, downloadSpeechModel, whisperModel
+        case speechEngine, localeIdentifier, maxRecordingSeconds, downloadSpeechModel
         case provider, model, openAIModel, openAIBaseURL, ollamaModel, ollamaBaseURL, ollamaContextLength
         case effort, useRefusalFallback, maxAgentSteps, followUpWindowSeconds
         case speakReplies, voiceIdentifier, speechRate
+        case listeningIdleMinutes
         case confirmationStrictness, fullControl, verifyCompletion, disabledTools, onboardingCompleted
     }
 
@@ -205,9 +213,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
             let stored = value(key, fallback).trimmingCharacters(in: .whitespacesAndNewlines)
             return stored.isEmpty && !allowEmpty ? fallback : stored
         }
-        // A model name that isn't one Voxa offers (edited by hand, or from a later version) falls back to the default.
-        let chosen = text(.whisperModel, defaults.whisperModel)
-        whisperModel = WhisperModelCatalog.model(chosen) == nil ? defaults.whisperModel : chosen
         model = text(.model, defaults.model)
         openAIModel = text(.openAIModel, defaults.openAIModel)
         openAIBaseURL = text(.openAIBaseURL, defaults.openAIBaseURL)
@@ -228,6 +233,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
         voiceIdentifier = text(.voiceIdentifier, defaults.voiceIdentifier, allowEmpty: true)
         let rate = value(.speechRate, defaults.speechRate)
         speechRate = rate.isFinite ? min(max(rate, Self.speechRateRange.lowerBound), Self.speechRateRange.upperBound) : defaults.speechRate
+
+        listeningIdleMinutes = min(
+            max(value(.listeningIdleMinutes, defaults.listeningIdleMinutes), Self.listeningIdleMinutesRange.lowerBound),
+            Self.listeningIdleMinutesRange.upperBound
+        )
 
         confirmationStrictness = value(.confirmationStrictness, defaults.confirmationStrictness)
         // Anything that isn't a plain true (missing, garbled, from another version) leaves confirmations on.

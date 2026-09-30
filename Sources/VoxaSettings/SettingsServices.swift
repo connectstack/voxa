@@ -19,8 +19,6 @@ public struct SettingsServices: Sendable {
     // Everything else
     public var permissions: PermissionsModel
     public var voice: VoiceServices
-    /// Which Whisper speech models are on this Mac, and the buttons that fetch and remove them.
-    public var whisper: WhisperModelsModel
     public var tools: [ToolInfo]
     public var audit: any AuditReading
     public var launchAtLogin: any LaunchAtLoginControlling
@@ -34,7 +32,6 @@ public struct SettingsServices: Sendable {
         openOllama: @escaping @MainActor @Sendable () -> Void = {},
         permissions: PermissionsModel,
         voice: VoiceServices,
-        whisper: WhisperModelsModel,
         tools: [ToolInfo],
         audit: any AuditReading,
         launchAtLogin: any LaunchAtLoginControlling,
@@ -46,7 +43,6 @@ public struct SettingsServices: Sendable {
         self.openOllama = openOllama
         self.permissions = permissions
         self.voice = voice
-        self.whisper = whisper
         self.tools = tools
         self.audit = audit
         self.launchAtLogin = launchAtLogin
@@ -68,7 +64,6 @@ public struct SettingsServices: Sendable {
             ollama: OfflineOllama(),
             permissions: PermissionsModel(permissions: UndecidedPermissions(), kinds: listedPermissions),
             voice: .inert,
-            whisper: .inert,
             tools: [],
             audit: EmptyAuditTrail(),
             launchAtLogin: InertLaunchAtLogin()

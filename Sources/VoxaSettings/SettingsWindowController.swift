@@ -39,7 +39,7 @@ public final class SettingsWindowController {
     private func makeWindow() -> NSWindow {
         // The content has a fixed size, and the window is created at exactly that size: nothing asks Auto Layout to
         // resize it. (Constraint-driven window sizing, e.g. `NSHostingController` with `.preferredContentSize`, crashes
-        // AppKit's layout pass on macOS 26; see HUDView.init.)
+        // AppKit's layout pass on macOS 26; see CommandBarView.init.)
         let host = NSHostingView(rootView: SettingsView(store: store, services: services, navigation: navigation))
         host.sizingOptions = []
 

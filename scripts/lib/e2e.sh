@@ -8,9 +8,13 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
 
 PORT="${PORT:-8899}"
-APP="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
+BUILT_APP="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
 SUITE="com.rohitsainier.voxa.e2e"
 WORK="$(mktemp -d)"
+# The app under test is a private copy of the build, made in e2e_init. Whoever runs `make run` is running the built app itself, from
+# the build folder, and a script that stopped "the app" by that path would stop theirs too. The copy's path is unique to this run,
+# so everything below that starts, finds or stops the app can only ever reach the copy.
+APP="$WORK/$APP_NAME.app"
 # The test copy of the app listens to notifications with this suffix, and only this script sends them, so a Voxa that someone is
 # using at the same time never hears them (and this script never touches it: it only ever stops the copy it started).
 HOOK_SUFFIX="e2e$$"
@@ -31,10 +35,10 @@ e2e_cleanup() {
 }
 
 e2e_init() {
-    [[ -d "$APP" ]] || die "no Debug app at $APP; run scripts/build.sh first"
+    [[ -d "$BUILT_APP" ]] || die "no Debug app at $BUILT_APP; run scripts/build.sh first"
     require python3 "python3 is needed for the mock server"
     trap e2e_cleanup EXIT
-    kill_app
+    ditto "$BUILT_APP" "$APP"
     log "Starting the mock server on port $PORT"
     python3 "$ROOT/scripts/mock-llm-server.py" --port "$PORT" --log "$WORK/requests.jsonl" >"$WORK/mock.out" 2>&1 &
     MOCK_PID=$!
@@ -77,7 +81,8 @@ launch() {
     open -n --env "VOXA_ANTHROPIC_BASE_URL=http://127.0.0.1:$PORT" --env VOXA_DEBUG_API_KEY=sk-ant-mock \
         --env VOXA_DEBUG_OPENAI_API_KEY=sk-mock --env "VOXA_DEBUG_DEFAULTS_SUITE=$SUITE" \
         --env "VOXA_DEBUG_HOOK_SUFFIX=$HOOK_SUFFIX" --env "VOXA_DEBUG_COMMAND_FILE=$WORK/command.txt" --env "VOXA_DEBUG_REPORT_FILE=$WORK/report.txt" \
-        --env "VOXA_DEBUG_AUDIT_PATH=$WORK/audit.jsonl" --env "VOXA_DEBUG_SAY_FILE=$WORK/say.txt" "$@" "$APP"
+        --env "VOXA_DEBUG_AUDIT_PATH=$WORK/audit.jsonl" --env "VOXA_DEBUG_SAY_FILE=$WORK/say.txt" \
+        --env VOXA_DEBUG_PANELS_OFFSCREEN=1 "$@" "$APP"
     wait_for 15 app_running || die "the app did not start"
     # A freshly built app can take a few seconds to start (macOS scans it first). It is ready once it answers a report request.
     wait_for 40 ready || die "the app started but never answered its debug hooks"

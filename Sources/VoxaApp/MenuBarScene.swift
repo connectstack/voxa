@@ -15,7 +15,7 @@ public struct MenuBarScene: Scene {
         MenuBarExtra {
             MenuBarContent(environment: environment)
         } label: {
-            Image(systemName: environment.session.status.symbolName)
+            Image(systemName: MenuBarIcon.symbolName(status: environment.session.status, handsFree: environment.handsFree.state))
                 .accessibilityLabel(L10n.Menu.accessibilityLabel)
         }
         .menuBarExtraStyle(.menu)
@@ -27,13 +27,14 @@ struct MenuBarContent: View {
 
     var body: some View {
         Text(statusText)
+        barItems
         if environment.settings.current.fullControl {
             Label(L10n.FullControl.menuOn, systemImage: "exclamationmark.shield.fill")
             Button(L10n.FullControl.menuTurnOff) { environment.settings.current.fullControl = false }
         }
         Divider()
         #if DEBUG
-        Menu("Debug: preview HUD") {
+        Menu("Debug: preview bar") {
             ForEach(DebugHUDState.allCases, id: \.self) { state in
                 Button(state.title) { environment.showDebugHUD(state) }
             }
@@ -53,10 +54,26 @@ struct MenuBarContent: View {
         .keyboardShortcut("q")
     }
 
+    /// The way in to the Voxa bar, and a quick way to stop listening (the microphone lets go at once).
+    @ViewBuilder
+    private var barItems: some View {
+        // Opened on the next turn, once the menu has finished closing, so the bar can take the keyboard.
+        Button(L10n.Bar.menuOpen(environment.hotkeys.openBarDescription)) {
+            Task { @MainActor in environment.showBar() }
+        }
+        if environment.handsFree.isOn {
+            Button(L10n.Bar.menuStopListening) { environment.handsFree.setOn(false) }
+        }
+    }
+
     private var statusText: String {
         switch environment.session.status {
         case .idle:
-            environment.hotkeys.pushToTalkDescription.map(L10n.Menu.ready) ?? L10n.Menu.readyNoShortcut
+            switch environment.handsFree.state {
+            case .listening: L10n.Bar.menuListening
+            case .unavailable(let error): error.title
+            default: environment.hotkeys.pushToTalkDescription.map(L10n.Menu.ready) ?? L10n.Menu.readyNoShortcut
+            }
         case .listening: L10n.Menu.listening
         case .thinking: L10n.Menu.thinking
         case .acting: L10n.Menu.acting
@@ -76,6 +93,18 @@ extension AppStatus {
         case .acting: "bolt.fill"
         case .confirming: "hand.raised.fill"
         case .error: "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+/// The menu-bar icon: what the session is doing, and when it is doing nothing, whether continuous listening has the microphone open.
+enum MenuBarIcon {
+    static func symbolName(status: AppStatus, handsFree: HandsFreeState) -> String {
+        guard status == .idle else { return status.symbolName }
+        switch handsFree {
+        case .starting, .listening: return "ear"
+        case .unavailable: return "mic.slash"
+        case .off, .paused: return status.symbolName
         }
     }
 }

@@ -10,9 +10,11 @@
 		67A4AF1ADD476742F70BB95C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A4FEE2B4197F693E588893B0 /* Assets.xcassets */; };
 		C0FBFF9FB00D764D693257CD /* VoxaApp in Frameworks */ = {isa = PBXBuildFile; productRef = 2122E7EBFF4AE5D6A9C5AA8D /* VoxaApp */; };
 		CC4B6EF405295222421C0354 /* VoxaMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E8F850572F24A1C6EBB475 /* VoxaMain.swift */; };
+		D7233335C72987262941E6C7 /* VoxaIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67086D102A03577A293AD3CB /* VoxaIntents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		67086D102A03577A293AD3CB /* VoxaIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoxaIntents.swift; sourceTree = "<group>"; };
 		A4FEE2B4197F693E588893B0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A5E8F850572F24A1C6EBB475 /* VoxaMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoxaMain.swift; sourceTree = "<group>"; };
 		A6002A73159158C1097879FC /* voxa */ = {isa = PBXFileReference; lastKnownFileType = folder; name = voxa; path = .; sourceTree = SOURCE_ROOT; };
@@ -43,6 +45,7 @@
 			isa = PBXGroup;
 			children = (
 				A4FEE2B4197F693E588893B0 /* Assets.xcassets */,
+				67086D102A03577A293AD3CB /* VoxaIntents.swift */,
 				A5E8F850572F24A1C6EBB475 /* VoxaMain.swift */,
 			);
 			path = App;
@@ -140,6 +143,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7233335C72987262941E6C7 /* VoxaIntents.swift in Sources */,
 				CC4B6EF405295222421C0354 /* VoxaMain.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -12,7 +12,7 @@ import VoxaTestSupport
 /// `.preferredContentSize` resized the window from Auto Layout inside the layout pass and AppKit threw. If constraint-
 /// driven sizing is ever reintroduced, this suite kills the test process instead of passing.
 @MainActor
-@Suite("SettingsWindowController", .serialized, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
+@Suite("SettingsWindowController", .serialized, .windowLock, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
 struct SettingsWindowTests {
     private func makeController() -> SettingsWindowController {
         _ = NSApplication.shared
@@ -72,7 +72,7 @@ struct SettingsWindowTests {
 }
 
 @MainActor
-@Suite("SettingsWindowController: tabs", .serialized, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
+@Suite("SettingsWindowController: tabs", .serialized, .windowLock, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
 struct SettingsWindowTabTests {
     @Test("switching provider with the Model tab open, back and forth, never crashes and keeps the window's size")
     func switchingProviders() async throws {
@@ -129,7 +129,7 @@ struct SettingsWindowTabTests {
 }
 
 @MainActor
-@Suite("Settings and walkthrough windows: every page", .serialized, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
+@Suite("Settings and walkthrough windows: every page", .serialized, .windowLock, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
 struct EveryPageWindowTests {
     private func makeStore() -> SettingsStore {
         SettingsStore(defaults: UserDefaults(suiteName: "com.rohitsainier.voxa.tests.pages.\(UUID().uuidString)")!)
@@ -273,7 +273,7 @@ struct EveryPageWindowTests {
 }
 
 @MainActor
-@Suite("Full control: the question", .serialized, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
+@Suite("Full control: the question", .serialized, .windowLock, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
 struct FullControlQuestionTests {
     private struct Host: View {
         @State var asking = true

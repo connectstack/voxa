@@ -50,6 +50,40 @@ struct AppSettingsTests {
         #expect(try decode(#"{"fullControl": "yes", "model": "claude-opus-5-5"}"#).model == "claude-opus-5-5")
     }
 
+    @Test("settings saved while Whisper was an option still load: the engine falls back to automatic and nothing else is lost")
+    func whisperWasRemoved() throws {
+        let settings = try decode(#"{"speechEngine":"whisper","whisperModel":"base.en","model":"claude-opus-5-5","fullControl":true}"#)
+        #expect(settings.speechEngine == .appleAutomatic)
+        #expect(settings.model == "claude-opus-5-5")
+        #expect(settings.fullControl)
+        #expect(SpeechEngineKind.allCases == [.appleAutomatic, .appleClassic])
+    }
+
+    @Test("continuous listening may go ten minutes without a word by default, and the choice stays in range", arguments: [
+        (-5, 0), (0, 0), (5, 5), (10, 10), (240, 240), (9_999, 240),
+    ])
+    func listeningIdle(input: Int, expected: Int) throws {
+        #expect(AppSettings().listeningIdleMinutes == 10)
+        #expect(try decode("{}").listeningIdleMinutes == 10)
+        #expect(try decode(#"{"listeningIdleMinutes": \#(input)}"#).listeningIdleMinutes == expected)
+        #expect(try decode(#"{"listeningIdleMinutes": "soon"}"#).listeningIdleMinutes == 10)
+    }
+
+    @Test("the listening setting survives being saved and loaded")
+    func listeningRoundTrip() throws {
+        let saved = try JSONEncoder().encode(AppSettings(listeningIdleMinutes: 30))
+        #expect(try JSONDecoder().decode(AppSettings.self, from: saved).listeningIdleMinutes == 30)
+    }
+
+    @Test("settings saved with the wake-phrase options of an earlier build still load, and nothing else is lost")
+    func wakePhraseSettingsAreIgnored() throws {
+        let settings = try decode(
+            #"{"handsFreeEnabled": true, "wakePhrase": "Hey Voxa", "handsFreeFollowUpSeconds": 8, "model": "claude-opus-5-5"}"#
+        )
+        #expect(settings.model == "claude-opus-5-5")
+        #expect(settings.listeningIdleMinutes == 10)
+    }
+
     @Test("the steps a command may take default to 20, and a 12 saved before that default rose follows it, once")
     func stepsDefault() throws {
         #expect(AppSettings().maxAgentSteps == AppSettings.defaultMaxAgentSteps && AppSettings.defaultMaxAgentSteps == 20)

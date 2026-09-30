@@ -17,51 +17,138 @@ import VoxaTools
 
 // MARK: - hud-snapshots
 
-/// One HUD state to render.
+/// One state of the Voxa bar to render.
 struct Snapshot {
     var name: String
-    var mode: HUDMode
+    /// Whether the person has the bar open (the microphone button shows), or it is only showing a command.
+    var isOpen = true
+    var mode: HUDMode = .idle
     var transcript = ""
     var isFinal = false
+    var text = ""
+    var listening: HandsFreeState = .off
+    var note: String?
+    var warning: String?
+    /// How loud the microphone is, 0 to 1, or nil for silence.
+    var level: Float?
+    var keysEnabled = true
 }
 
-@MainActor func hudSnapshotList() -> [Snapshot] {
-
-    let stretch = "Set a timer for five minutes and remind me to stretch"
-    let longCommand =
+/// Words and problems the pictures share.
+private enum SampleText {
+    static let stretch = "Set a timer for five minutes and remind me to stretch"
+    static let longCommand =
         "Open Safari and search for the best restaurants near me that are open late tonight and have "
         + "vegetarian options and outdoor seating, then add the top result to my calendar"
-    let plainError = UserFacingError(title: L10n.Errors.noInputDeviceTitle, detail: L10n.Errors.noInputDeviceDetail)
+    static let micError = UserFacingError.permissionRequired(.microphone, status: .denied)
+}
 
+@MainActor func barSnapshotList() -> [Snapshot] {
+    waitingSnapshots() + talkingSnapshots() + commandSnapshots() + questionSnapshots()
+}
+
+/// The bar open, waiting.
+@MainActor private func waitingSnapshots() -> [Snapshot] {
+    [
+        Snapshot(name: "idle"),
+        Snapshot(name: "typing", text: "open Safari and search for Swift concurrency"),
+        Snapshot(name: "listening", listening: .listening, level: 0.5),
+        Snapshot(name: "listening-quiet", listening: .listening),
+        Snapshot(name: "listening-fullcontrol", listening: .listening, warning: L10n.Bar.fullControlWarning, level: 0.35),
+        Snapshot(name: "busy", text: "open Notes", note: L10n.Bar.busyNote),
+        Snapshot(name: "stopped", note: L10n.Bar.stoppedIdle(10)),
+        Snapshot(name: "unavailable", listening: .unavailable(SampleText.micError)),
+    ]
+}
+
+/// Holding the shortcut to talk.
+@MainActor private func talkingSnapshots() -> [Snapshot] {
+    let stretch = SampleText.stretch
     return [
-        Snapshot(name: "preparing", mode: .preparing), Snapshot(name: "listening-empty", mode: .listening),
-        Snapshot(name: "listening-partial", mode: .listening, transcript: stretch),
-        Snapshot(name: "listening-long", mode: .listening, transcript: longCommand),
-        Snapshot(name: "transcribing", mode: .transcribing, transcript: stretch, isFinal: true),
-        Snapshot(name: "result", mode: .result(stretch), transcript: stretch, isFinal: true),
+        Snapshot(name: "preparing", isOpen: false, mode: .preparing),
+        Snapshot(name: "listening-empty", isOpen: false, mode: .listening, level: 0.4),
+        Snapshot(name: "listening-partial", isOpen: false, mode: .listening, transcript: stretch, level: 0.55),
+        Snapshot(name: "listening-long", isOpen: false, mode: .listening, transcript: SampleText.longCommand, level: 0.55),
+        Snapshot(name: "transcribing", isOpen: false, mode: .transcribing, transcript: stretch, isFinal: true),
+        Snapshot(name: "result", isOpen: false, mode: .result(stretch), transcript: stretch, isFinal: true),
         Snapshot(
             name: "notice",
+            isOpen: false,
             mode: .notice(title: L10n.HUD.didntCatch, detail: L10n.HUD.didntCatchDetail("⌥Space"))
         ),
-        Snapshot(name: "error-mic", mode: .error(.permissionRequired(.microphone, status: .denied))),
-        Snapshot(name: "error-plain", mode: .error(plainError)),
-        Snapshot(name: "thinking", mode: .thinking(partial: nil), transcript: stretch, isFinal: true),
+    ]
+}
+
+/// A command under way, and what it comes to.
+@MainActor private func commandSnapshots() -> [Snapshot] {
+    let stretch = SampleText.stretch
+    let longCommand = SampleText.longCommand
+    let plainError = UserFacingError(title: L10n.Errors.noInputDeviceTitle, detail: L10n.Errors.noInputDeviceDetail)
+    return [
+        Snapshot(name: "thinking", isOpen: false, mode: .thinking(partial: nil), transcript: stretch, isFinal: true),
         Snapshot(
             name: "thinking-partial",
+            isOpen: false,
             mode: .thinking(partial: "Let me set that timer for you."),
             transcript: stretch,
             isFinal: true
         ),
-        Snapshot(name: "acting", mode: .acting(title: "Open Safari"), transcript: stretch, isFinal: true),
-        Snapshot(name: "reply", mode: .reply("Done. I opened Safari and searched for Swift concurrency.")),
+        Snapshot(name: "acting", isOpen: false, mode: .acting(title: "Open Safari"), transcript: stretch, isFinal: true),
+        Snapshot(
+            name: "reply",
+            isOpen: false,
+            mode: .reply("Done. I opened Safari and searched for Swift concurrency."),
+            transcript: "Open Safari and search for Swift concurrency",
+            isFinal: true
+        ),
         Snapshot(
             name: "reply-long",
-            mode: .reply(longCommand + ". That is everything I found; the first three results are open in Safari tabs.")
+            isOpen: false,
+            mode: .reply(longCommand + ". That is everything I found; the first three results are open in Safari tabs."),
+            transcript: longCommand,
+            isFinal: true
         ),
-        Snapshot(name: "confirm-script", mode: .confirm(SamplePrompts.script)),
-        Snapshot(name: "confirm-link", mode: .confirm(SamplePrompts.link)),
-        Snapshot(name: "confirm-taint", mode: .confirm(SamplePrompts.taint)),
-        Snapshot(name: "confirm-long", mode: .confirm(SamplePrompts.longScript)),
+        Snapshot(name: "error-mic", isOpen: false, mode: .error(SampleText.micError)),
+        Snapshot(name: "error-plain", isOpen: false, mode: .error(plainError), transcript: stretch, isFinal: true),
+    ]
+}
+
+/// A question, and with the microphone on, where the button stays through all of it.
+@MainActor private func questionSnapshots() -> [Snapshot] {
+    let stretch = SampleText.stretch
+    return [
+        Snapshot(
+            name: "confirm-script",
+            isOpen: false,
+            mode: .confirm(SamplePrompts.script),
+            transcript: "Turn the volume down",
+            isFinal: true
+        ),
+        Snapshot(name: "confirm-guard", isOpen: false, mode: .confirm(SamplePrompts.script), keysEnabled: false),
+        Snapshot(name: "confirm-link", isOpen: false, mode: .confirm(SamplePrompts.link)),
+        Snapshot(name: "confirm-taint", isOpen: false, mode: .confirm(SamplePrompts.taint)),
+        Snapshot(name: "confirm-long", isOpen: false, mode: .confirm(SamplePrompts.longScript)),
+        Snapshot(
+            name: "mic-thinking",
+            mode: .thinking(partial: nil),
+            transcript: stretch,
+            isFinal: true,
+            listening: .paused(.working)
+        ),
+        Snapshot(
+            name: "mic-reply",
+            mode: .reply("Done. I set a timer for five minutes."),
+            transcript: stretch,
+            isFinal: true,
+            listening: .paused(.speaking)
+        ),
+        Snapshot(
+            name: "mic-confirm",
+            mode: .confirm(SamplePrompts.taint),
+            transcript: "Open Calculator",
+            isFinal: true,
+            listening: .paused(.working)
+        ),
     ]
 }
 
@@ -76,25 +163,38 @@ struct Snapshot {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.prohibited)
 
-    let snapshots = hudSnapshotList()
-
     let appearances: [(name: String, appearance: NSAppearance, backdrop: NSColor)] = [
         ("light", NSAppearance(named: .aqua)!, NSColor(calibratedRed: 0.80, green: 0.83, blue: 0.90, alpha: 1)),
         ("dark", NSAppearance(named: .darkAqua)!, NSColor(calibratedRed: 0.10, green: 0.11, blue: 0.14, alpha: 1)),
     ]
 
-    for snapshot in snapshots {
+    for snapshot in barSnapshotList() {
         for (appearanceName, appearance, backdrop) in appearances {
-            let model = makeModel(for: snapshot.mode, transcript: snapshot.transcript, isFinal: snapshot.isFinal)
+            let input = CommandBarModel()
+            let content = HUDModel()
+            input.isOpen = snapshot.isOpen
+            input.text = snapshot.text
+            input.listening = snapshot.listening
+            input.note = snapshot.note
+            if let warning = snapshot.warning { input.warning = { warning } }
+            content.mode = snapshot.mode
+            content.transcript = snapshot.transcript
+            content.isTranscriptFinal = snapshot.isFinal
+            content.hotkeyHint = "⌥Space"
+            content.confirmationKeysEnabled = snapshot.keysEnabled
+            for step in 0..<HUDModel.barCount {
+                let wave = snapshot.level.map { Float(abs(sin(Double(step) / 3.2)) * 0.6 + 0.05) * $0 * 1.4 } ?? 0
+                content.push(level: AudioLevel(rms: wave, peak: 1))
+            }
             guard
                 let bitmap = renderBitmap(
-                    of: HUDView(model: model),
+                    of: CommandBarView(model: input, content: content),
                     appearance: appearance,
                     backdrop: backdrop,
                     scale: scale
                 )
             else { continue }
-            let file = outputURL.appendingPathComponent("hud-\(snapshot.name)-\(appearanceName).png")
+            let file = outputURL.appendingPathComponent("bar-\(snapshot.name)-\(appearanceName).png")
             if let png = bitmap.representation(using: .png, properties: [:]) {
                 try? png.write(to: file)
                 print("wrote \(file.path) (\(bitmap.pixelsWide)×\(bitmap.pixelsHigh))")
@@ -214,7 +314,6 @@ enum SamplePrompts {
             pages.append(("settings-\(tab.rawValue)", AnyView(EmptyView()), SettingsView.contentSize))
         }
     }
-    pages.append(("whisper-models", AnyView(EmptyView()), CGSize(width: SettingsView.contentSize.width, height: 430)))
     for step in 0..<WelcomePreview.stepCount {
         pages.append(
             (
@@ -229,17 +328,7 @@ enum SamplePrompts {
     ] {
         for page in pages {
             let view: AnyView
-            if page.name == "whisper-models" {
-                // One model of each kind of state, and a language the chosen (English-only) model doesn't cover.
-                store.current.whisperModel = "base.en"
-                store.current.localeIdentifier = "fr_FR"
-                let states: [String: WhisperModelsModel.State] = [
-                    "tiny": .notInstalled, "base.en": .ready, "base": .downloading(fraction: 0.42), "small.en": .preparing,
-                    "small": .failed("The internet connection appears to be offline."),
-                ]
-                view = AnyView(WhisperModelsPreview(store: store, models: .preview(states)))
-                store.current.localeIdentifier = AppSettings.systemLocaleIdentifier
-            } else if page.name.hasPrefix("settings-") {
+            if page.name.hasPrefix("settings-") {
                 // The provider is part of the page, and the page part of the name.
                 let parts = page.name.split(separator: "-").map(String.init)
                 var tab = SettingsView.Tab(rawValue: parts[1]) ?? .general
@@ -271,20 +360,7 @@ enum SamplePrompts {
     }
 }
 
-@MainActor func makeModel(for mode: HUDMode, transcript: String, isFinal: Bool) -> HUDModel {
-    let model = HUDModel()
-    model.mode = mode
-    model.transcript = transcript
-    model.isTranscriptFinal = isFinal
-    model.hotkeyHint = "⌥Space"
-    for step in 0..<HUDModel.barCount {
-        let wave = abs(sin(Double(step) / 3.2)) * 0.6 + 0.05
-        model.push(level: AudioLevel(rms: Float(wave), peak: 1))
-    }
-    return model
-}
-
-/// Renders the HUD over a flat backdrop into a bitmap. (System materials can't be captured offscreen, so the panel's
+/// Renders a view over a flat backdrop into a bitmap. (System materials can't be captured offscreen, so the panel's
 /// translucent background appears flat here; the layout, type and colors are what these images are for.)
 @MainActor func renderBitmap(
     of view: some View,

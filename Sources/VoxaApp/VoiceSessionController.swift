@@ -77,6 +77,9 @@ public final class VoiceSessionController {
     let confirmations: (any ConfirmationResponding)?
     let speaker: ReplySpeaker?
     let now: @Sendable () -> Date
+    /// Told when a command starts, whoever gave it (the key, the bar, the microphone button, Siri), so the Voxa bar can give the
+    /// keyboard back to the app in front: a command may type in it or press its keys.
+    @ObservationIgnored public var onCommandStarted: (@MainActor () -> Void)?
 
     @ObservationIgnored var run: Run?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
@@ -218,9 +221,6 @@ public final class VoiceSessionController {
         let snapshot = settings.current
         let recognizer = recognizers.recognizer(for: snapshot)
         _ = await recognizer.requiredPermissions(locale: snapshot.locale)
-        // A Whisper model takes a moment to load; doing it now means the first command doesn't wait for it. If the model isn't
-        // downloaded, that is for the person to be told when they speak, not something to raise at launch.
-        if snapshot.speechEngine == .whisper { try? await recognizer.prepare(locale: snapshot.locale) }
     }
 
     /// The user pressed Esc: abort the running command, or dismiss a result or error that is still showing.

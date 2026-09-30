@@ -52,6 +52,13 @@ public actor FakeAudioCapture: AudioCapturing {
         chunkContinuation?.yield(chunk)
     }
 
+    /// Delivers `samples` as they are.
+    public func emit(_ samples: [Float]) {
+        let chunk = AudioChunk(samples: samples, startTime: Double(emittedSamples) / AudioChunk.canonicalSampleRate)
+        emittedSamples += samples.count
+        chunkContinuation?.yield(chunk)
+    }
+
     public func emit(level: AudioLevel) {
         levelContinuation?.yield(level)
     }

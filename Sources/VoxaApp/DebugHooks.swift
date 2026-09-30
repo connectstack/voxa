@@ -115,7 +115,7 @@ private func debugHook(_ name: String) -> String {
 }
 
 extension AppEnvironment {
-    /// Post `notifyutil -p com.rohitsainier.voxa.debug.hud.<state>` from a shell to pin the HUD to that state.
+    /// Post `notifyutil -p com.rohitsainier.voxa.debug.hud.<state>` from a shell to pin the bar to that state.
     func installDebugHooks() {
         for state in DebugHUDState.allCases {
             var token: Int32 = 0
@@ -148,6 +148,20 @@ extension AppEnvironment {
                 self?.session.debugSubmit(text.trimmingCharacters(in: .whitespacesAndNewlines))
             }
         }
+        // Hand a command over the way Siri's App Intent does (`SiriCommand`), from the same file:
+        //   echo "open safari" > /tmp/cmd.txt ; notifyutil -p com.rohitsainier.voxa.debug.siri
+        var siriToken: Int32 = 0
+        notify_register_dispatch(debugHook("siri"), &siriToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard
+                    let self,
+                    let path = ProcessInfo.processInfo.environment["VOXA_DEBUG_COMMAND_FILE"],
+                    let text = try? String(contentsOfFile: path, encoding: .utf8)
+                else { return }
+                let outcome = SiriCommand.run(text, on: self.session)
+                try? "\(outcome)\n".write(toFile: path + ".siri", atomically: true, encoding: .utf8)
+            }
+        }
         // Keys (Esc, ⌘Return) and answers a confirmation would receive, and a report of which keys are captured right now.
         var returnToken: Int32 = 0
         notify_register_dispatch(debugHook("key.allow"), &returnToken, .main) { [weak self] _ in
@@ -165,16 +179,17 @@ extension AppEnvironment {
         }
         var denyToken: Int32 = 0
         notify_register_dispatch(debugHook("button.deny"), &denyToken, .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hud.pressConfirmationButton(.deny) }
+            MainActor.assumeIsolated { self?.bar.pressConfirmationButton(.deny) }
         }
         var allowToken: Int32 = 0
         notify_register_dispatch(debugHook("button.allow"), &allowToken, .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hud.pressConfirmationButton(.allow) }
+            MainActor.assumeIsolated { self?.bar.pressConfirmationButton(.allow) }
         }
         var recoveryToken: Int32 = 0
         notify_register_dispatch(debugHook("button.recovery"), &recoveryToken, .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hud.pressRecoveryButton() }
+            MainActor.assumeIsolated { self?.bar.pressRecoveryButton() }
         }
+        installBarDebugHooks()
         // `debug.report` writes the current status to VOXA_DEBUG_REPORT_FILE (one line, key=value pairs).
         var reportToken: Int32 = 0
         notify_register_dispatch(debugHook("report"), &reportToken, .main) { [weak self] _ in
@@ -182,6 +197,49 @@ extension AppEnvironment {
         }
 
         installSettingsDebugHooks()
+    }
+
+    /// Hooks that work the Voxa bar the way a person does: open it, type into it, press its microphone.
+    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.show          opens it (as the shortcut and the menu item do)
+    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.hide          Esc: puts it away and stops listening
+    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.type          types the text in VOXA_DEBUG_COMMAND_FILE into the field and presses Return
+    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.fill          only types it, so the bar can be looked at
+    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.mic           clicks the microphone button
+    private func installBarDebugHooks() {
+        func text() -> String? {
+            ProcessInfo.processInfo.environment["VOXA_DEBUG_COMMAND_FILE"]
+                .flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var showToken: Int32 = 0
+        notify_register_dispatch(debugHook("bar.show"), &showToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showBar() }
+        }
+        var hideToken: Int32 = 0
+        notify_register_dispatch(debugHook("bar.hide"), &hideToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.bar.model.escape() }
+        }
+        var typeToken: Int32 = 0
+        notify_register_dispatch(debugHook("bar.type"), &typeToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if !self.bar.isVisible { self.showBar() }
+                if let typed = text() { self.bar.model.text = typed }
+                self.bar.model.submit()
+            }
+        }
+        var fillToken: Int32 = 0
+        notify_register_dispatch(debugHook("bar.fill"), &fillToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if !self.bar.isVisible { self.showBar() }
+                if let typed = text() { self.bar.model.text = typed }
+            }
+        }
+        var micToken: Int32 = 0
+        notify_register_dispatch(debugHook("bar.mic"), &micToken, .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.bar.model.toggleListening() }
+        }
     }
 
     /// Hooks that open and close the Settings window, the way the menu item and an error's button do.
@@ -264,45 +322,43 @@ extension AppEnvironment {
             + "mic=\(permissions.status(of: .microphone)) speech=\(permissions.status(of: .speechRecognition)) "
             + "provider=\(settings.current.provider.rawValue) settingsTab=\(settingsWindow.selectedTab.rawValue) "
             + "welcome=\(onboardingWindow.isVisible) speaking=\(speaker.isSpeaking) "
-            + "accessibility=\(permissions.status(of: .accessibility)) "
+            + "accessibility=\(permissions.status(of: .accessibility)) handsFree=\(handsFree.state.debugName) \(bar.debugSummary) "
             + "hasKey=\(keyStores[settings.current.provider]?.hasKey() ?? false)\n"
         try? line.write(toFile: path, atomically: true, encoding: .utf8)
     }
 
     func showDebugHUD(_ state: DebugHUDState) {
-        hud.hotkeyHint = hotkeys.pushToTalkDescription ?? "⌥Space"
+        bar.hotkeyHint = hotkeys.pushToTalkDescription ?? "⌥Space"
         let sample = "Set a timer for five minutes and remind me to stretch"
         let long =
             "Open Safari and search for the best restaurants near me that are open late tonight and have "
             + "vegetarian options and outdoor seating, then add the top result to my calendar"
 
         func meter() {
-            for step in 0..<HUDModel.barCount {
-                hud.push(level: AudioLevel(rms: Float(abs(sin(Double(step) / 3.2)) * 0.6 + 0.05), peak: 1))
-            }
+            bar.debugFillMeter((0..<HUDModel.barCount).map { Float(abs(sin(Double($0) / 3.2)) * 0.6 + 0.05) })
         }
 
         switch state {
         case .listening:
-            hud.beginSession(); meter(); hud.show(.listening)
+            bar.beginSession(); meter(); bar.show(.listening)
         case .partial:
-            hud.beginSession(); meter(); hud.setTranscript(sample, isFinal: false); hud.show(.listening)
+            bar.beginSession(); meter(); bar.setTranscript(sample, isFinal: false); bar.show(.listening)
         case .long:
-            hud.beginSession(); meter(); hud.setTranscript(long, isFinal: false); hud.show(.listening)
+            bar.beginSession(); meter(); bar.setTranscript(long, isFinal: false); bar.show(.listening)
         case .transcribing:
-            hud.beginSession(); hud.setTranscript(sample, isFinal: false); hud.show(.transcribing)
+            bar.beginSession(); bar.setTranscript(sample, isFinal: false); bar.show(.transcribing)
         case .result:
             showCommandCard(sample, .result(sample))
         case .notice:
-            hud.show(.notice(title: L10n.HUD.didntCatch, detail: L10n.HUD.didntCatchDetail(hud.hotkeyHint ?? "⌥Space")))
+            bar.show(.notice(title: L10n.HUD.didntCatch, detail: L10n.HUD.didntCatchDetail(bar.hotkeyHint ?? "⌥Space")))
         case .error:
-            hud.show(.error(.permissionRequired(.microphone, status: .denied)))
+            bar.show(.error(.permissionRequired(.microphone, status: .denied)))
         case .errorPlain:
-            hud.show(
+            bar.show(
                 .error(UserFacingError(title: L10n.Errors.noInputDeviceTitle, detail: L10n.Errors.noInputDeviceDetail))
             )
         case .hide:
-            hud.hide(after: nil)
+            bar.hide(after: nil)
         case .thinking:
             showCommandCard(sample, .thinking(partial: nil))
         case .thinkingPartial:
@@ -310,11 +366,11 @@ extension AppEnvironment {
         case .acting:
             showCommandCard(sample, .acting(title: "Open Safari"))
         case .reply:
-            hud.show(.reply("Done. I opened Safari and searched for Swift concurrency."))
+            bar.show(.reply("Done. I opened Safari and searched for Swift concurrency."))
         case .replyLong:
             let tail = ". That is everything I found; the first three results are open in Safari tabs, "
                 + "and I added the best one to your calendar for tonight at eight."
-            hud.show(.reply(long + tail))
+            bar.show(.reply(long + tail))
         case .confirmScript:
             showDebugConfirmation(DebugPrompts.script)
         case .confirmURL:
@@ -328,14 +384,27 @@ extension AppEnvironment {
 
     /// A card that shows the recognized command with `mode` in front of it, as the real flow does.
     private func showCommandCard(_ command: String, _ mode: HUDMode) {
-        hud.beginSession()
-        hud.setTranscript(command, isFinal: true)
-        hud.show(mode)
+        bar.beginSession()
+        bar.setTranscript(command, isFinal: true)
+        bar.show(mode)
     }
 
     private func showDebugConfirmation(_ prompt: ConfirmationPrompt) {
-        hud.show(.confirm(prompt))
-        hud.setConfirmationKeysEnabled(true)
+        bar.show(.confirm(prompt))
+        bar.setConfirmationKeysEnabled(true)
+    }
+}
+
+private extension HandsFreeState {
+    /// A short stable name for the debug report, which a shell reads.
+    var debugName: String {
+        switch self {
+        case .off: "off"
+        case .starting: "starting"
+        case .listening: "listening"
+        case .paused(let availability): "paused.\(availability)"
+        case .unavailable: "unavailable"
+        }
     }
 }
 #endif

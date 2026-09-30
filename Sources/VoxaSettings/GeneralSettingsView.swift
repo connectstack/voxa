@@ -22,10 +22,8 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             shortcutSection
+            barSection
             speechSection
-            if store.current.speechEngine == .whisper {
-                WhisperModelsSection(store: store, models: services.whisper)
-            }
             voiceSection
             startupSection
         }
@@ -53,12 +51,34 @@ struct GeneralSettingsView: View {
         }
     }
 
+    private var barSection: some View {
+        Section(L10n.Bar.section) {
+            KeyboardShortcuts.Recorder(for: .openBar) {
+                Text(L10n.Bar.shortcut)
+            }
+            Text(L10n.Bar.shortcutHelp).font(.caption).foregroundStyle(.secondary)
+            Picker(L10n.Bar.idle, selection: $store.current.listeningIdleMinutes) {
+                ForEach(idleChoices, id: \.self) { minutes in
+                    Text(minutes == 0 ? L10n.Bar.idleNever : L10n.Bar.idleMinutes(minutes)).tag(minutes)
+                }
+            }
+            Text(L10n.Bar.idleHelp).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// How long a microphone left on may go with nothing said, with the current value if it isn't one of the usual ones.
+    private var idleChoices: [Int] {
+        var choices = [0, 5, 10, 30, 60]
+        let current = store.current.listeningIdleMinutes
+        if !choices.contains(current) { choices.append(current) }
+        return choices.sorted()
+    }
+
     private var speechSection: some View {
         Section {
             Picker(L10n.Settings.speechEngine, selection: $store.current.speechEngine) {
                 Text(L10n.Settings.engineAutomatic).tag(SpeechEngineKind.appleAutomatic)
                 Text(L10n.Settings.engineClassic).tag(SpeechEngineKind.appleClassic)
-                Text(L10n.Settings.engineWhisper).tag(SpeechEngineKind.whisper)
             }
             Picker(L10n.Settings.language, selection: $store.current.localeIdentifier) {
                 ForEach(languageChoices) { language in

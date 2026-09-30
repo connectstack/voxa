@@ -7,10 +7,13 @@ covers *why*.
 ## 1. Goals and non-goals
 
 **Goal.** A menu-bar macOS app. The user holds a global hotkey, speaks a command, and an LLM with tool calling carries it
-out on their Mac, then speaks and shows the result. Push-to-talk only; nothing listens in the background.
+out on their Mac, then speaks and shows the result. The microphone is open only because the user asked: while the key is held, or
+while the microphone button in the Voxa bar is on (continuous listening, per session, never saved). Commands can also be typed
+into the bar, and Siri can hand one over. Nothing listens in the background otherwise.
 
 **Non-goals for v1.** Mac App Store distribution (Accessibility and Apple Events are impossible in the sandbox), an
-arbitrary-shell tool, wake-word activation, cloud speech recognition.
+arbitrary-shell tool, wake-word activation (Voxa has no wake phrase of its own: the microphone button is the switch, and Siri's
+"Hey Siri, ask Voxa" is the hands-free route), cloud speech recognition.
 
 ## 2. Module layout
 
@@ -22,18 +25,19 @@ is a thin shell around `VoxaApp`.
 voxa/
 ├─ Package.swift               libraries, the voxa-dev tool, tests (swift-tools 6.2, Swift 6 mode, ExistentialAny)
 ├─ project.yml, Voxa.xcodeproj  XcodeGen app shell: signing, hardened runtime, Info.plist, entitlements, icon
-├─ App/                         VoxaMain.swift (@main), Info.plist, Voxa.entitlements, Assets.xcassets
+├─ App/                         VoxaMain.swift (@main), VoxaIntents.swift (Siri's App Intent), Info.plist, Voxa.entitlements, Assets
 ├─ Sources/
 │  ├─ VoxaCore/          shared kernel: AudioChunk, UserFacingError, L10n, Log, AppSettings, PermissionKind, HotkeyService,
 │  │                     JSONValue, Schema, AgentTool/ToolResult/RiskLevel, ConfirmationPrompt, AuditEntry, JSONLAuditLog
-│  ├─ VoxaAudio/         AudioCapturing, MicrophoneCapture (AVAudioEngine), SpeechFormatConverter, LevelMeter
-│  ├─ VoxaSpeech/        SpeechRecognizer; SFSpeechRecognizer + SpeechAnalyzer engines; [M4] WhisperRecognizer (the engine-agnostic
-│  │                     streaming around any Whisper), WhisperModelsModel (what Settings' model list drives)
-│  ├─ VoxaWhisper/ [M4]  the one module that carries WhisperKit: model storage and "ready" markers, download + prepare, loading and
-│  │                     idle unloading
+│  ├─ VoxaAudio/         AudioCapturing, MicrophoneCapture (AVAudioEngine), SpeechFormatConverter, LevelMeter, VoiceActivityDetector
+│  │                     (cuts a microphone stream into utterances: adaptive noise floor, zero-crossing gate, warm-up, pre-roll)
+│  ├─ VoxaSpeech/        SpeechRecognizer; SFSpeechRecognizer + SpeechAnalyzer engines
 │  ├─ VoxaPermissions/   PermissionsProviding, SystemPermissionsManager (asks for every kind), PermissionsModel (rows, polling)
 │  ├─ VoxaVoice/  [M3]   text to speech: SpeechSynthesizing, AVFoundationSpeaker, voice choice, text made ready to be said
-│  ├─ VoxaHUD/           non-activating NSPanel + SwiftUI HUD: listening, thinking, acting, confirmation card, reply
+│  ├─ VoxaHUD/           the Voxa bar, the one place Voxa shows itself: a non-activating NSPanel + SwiftUI card with a field, Voxa's
+│  │                     orb and a microphone button, opening out below for what was heard, progress, the reply, a problem and the
+│  │                     confirmation card (CommandBarModel/View/Controller = the field and microphone; HUDModel/BarContent = what
+│  │                     is shown below; the controller is what the session presents to)
 │  ├─ VoxaSettings/      SettingsStore, six tabs (General incl. voice and login, Model, Tools, Permissions, Safety, History),
 │  │                     window controllers for Settings and the first-run walkthrough, Ollama status
 │  ├─ VoxaLLM/    [M2]   Model clients over URLSession, one per provider (Claude, OpenAI, Ollama) behind RoutingLLMClient;
@@ -45,11 +49,13 @@ voxa/
 │  │                     file_search, reveal_in_finder, file_move, file_trash; EventKit, pasteboard, Accessibility, CGEvent,
 │  │                     ScreenCaptureKit and the file system behind protocols, with a pretend desktop and disk for tests and demos
 │  ├─ VoxaAgent/  [M2]   AgentLoop, AgentService, ToolRegistry, ConversationMemory, system prompt + runtime context
-│  ├─ VoxaApp/           composition root, VoiceSessionController, ConfirmationCoordinator, hotkey service, menu bar
-│  ├─ VoxaDev/           developer CLI: transcribe, speech-status, hud-snapshots, system-prompt, ask, chat, ollama
+│  ├─ VoxaApp/           composition root, VoiceSessionController, ConfirmationCoordinator, hotkey service, menu bar;
+│  │                     HandsFreeListener (continuous listening) and HandsFreeHost, SiriCommand (what Siri's App Intent calls)
+│  ├─ VoxaDev/           developer CLI: transcribe, vad, handsfree, speech-status, hud-snapshots, system-prompt, ask, chat, ollama
 │  └─ VoxaTestSupport/   ManualClock, fakes, ScriptedLLM, StubTool, MockHTTPTransport, SSE builders, TestSignal
 ├─ Tests/                        one test target per module
-└─ scripts/                      build, sign, notarize, icon, window inspection, mock-llm-server.py, e2e-providers.sh, e2e-tools.sh
+└─ scripts/                      build, sign, notarize, icon, window inspection, mock-llm-server.py, e2e-providers.sh, e2e-tools.sh,
+                                 e2e-bar.sh
 ```
 
 ```mermaid
@@ -70,10 +76,6 @@ graph TD
     Perms --> Core
     HUD --> Core
     Settings --> Core
-    App --> Whisper[VoxaWhisper]
-    Whisper --> Speech
-    Whisper --> Core
-    Whisper -. WhisperKit .-> WK[(WhisperKit)]
     Settings --> Speech
     Settings --> LLM
     LLM --> Core
@@ -398,26 +400,6 @@ each client = StreamingEngine (retries, backoff, cancellation, .restarted) + a w
 - The real disk is tested on throwaway folders (links, packages, permissions, name clashes) but the real `trashItem` isn't called in
   tests, because it would put something in the user's own Trash.
 
-### Whisper (M4)
-
-- **Why a module of its own.** WhisperKit is a large dependency that most of the app has no business seeing. Only `VoxaWhisper` imports
-  it; everything else works with two small protocols in `VoxaSpeech` (`WhisperTranscribing`, `WhisperTranscriberProviding`), so the
-  streaming logic and the settings are tested without a model.
-- **Streaming from a non-streaming model.** Whisper transcribes finished audio, so the recognizer re-transcribes everything heard so
-  far after each second of new audio (a revisable guess, as the `SpeechRecognizer` contract wants) and once more for the final text.
-  A spoken command is seconds long, so this is cheap; past 28 s the guesses stop and only the final covers everything. Whole
-  recordings that are near silence are never sent (Whisper makes text up for silence), and the sound annotations it emits
-  (`[BLANK_AUDIO]`, `(music)`, notes) are stripped.
-- **Nothing is downloaded behind your back.** Loading only ever uses a model that is *ready*: downloaded, prepared for this Mac
-  (Core ML compiles it for the chip, and the small tokenizer file is fetched, in one "prepare" step) and recorded in a marker. The
-  download happens only from the button in Settings, resumable, cancellable, one at a time. Models live in Application Support,
-  not Documents (WhisperKit's default, which would ask macOS for access).
-- **Memory.** A loaded model is kept while it is in use and let go after ten idle minutes; launching with Whisper chosen loads it in
-  the background so the first command doesn't wait.
-- **Not verified here:** a real transcription. Doing so needs a model download (about 150 MB for Base), which nobody has approved;
-  everything around it is tested, and `voxa-dev transcribe clip.aiff --engine whisper --model base.en --download` is the one command
-  that does it.
-
 ### Checking that a command is finished (after M4)
 
 **The failure.** *"Play Hanuman Chalisa in YouTube"* opened the search page and replied "I opened YouTube search results"; only a
@@ -493,13 +475,18 @@ runtime, filled in with the step cap, and kept **static**. Tests pin the safety 
 | A17 | Terminals, script editors, password managers and the admin prompt are off limits for UI tools and screenshots; a few system apps always ask. | Typing into a terminal would run commands and get around the no-shell rule; secrets shouldn't reach a model. A short list is a second line of defence, not the first. |
 | A18 | A screenshot covers one window unless the whole screen is asked for (which always asks), and is dropped from the history when the command ends. | A picture can't be sanitized and can show anything; it is the most private thing Voxa can send. |
 | A19 | File tools use the Trash and never delete or replace; only the home folder and external drives, minus hidden items, the Library and packages. Enforced by a lint rule as well as by the tools. | A voice mishearing must never cost a file that can't be recovered. |
-| A20 | WhisperKit lives in its own module; models are downloaded only on request; a model is usable only once a "ready" marker says it was prepared. | Keep a big dependency contained, never surprise anyone with a download, never mistake a half-finished download for a model. |
+| A20 | *(Superseded by A27: Whisper was removed.)* WhisperKit lived in its own module; models were downloaded only on request. | |
 | A21 | Screenshots and UI listings carry no text of Voxa's own beyond a reference and a role; tool results never repeat labels or file names. | Text from outside must reach the model only inside the untrusted envelope. |
 | A22 | End-to-end scripts use test hooks with a private suffix and stop only their own copy. | They must be safe to run while the user is using Voxa. |
 | A23 | Full control is one switch in Settings → Safety, off by default, asked about before it turns on, visible in the menu bar with a way to switch it off, and marked in History. It leaves refusals alone; nothing else asks, scripts and system-changing apps included. | The user asked not to be asked, and said a version that still asked for scripts and system apps would be "a manual agent, not an automation agent". Removing the questions is their call, made knowingly (the question before it turns on names scripts and changes to the Mac); removing the refusals (password fields, terminals, shell access, hidden paths, Voxa's own windows) is not what the switch is for. |
 | A24 | "Play X on YouTube" must be one command: `open_url` says it only opened the page (and that it may still be loading); a `wait` tool (read-only, 1–10 s) lets the page draw; the prompt says to finish the job, that a results page plays nothing, and gives the YouTube recipe (results URL with the video filter, wait, screenshot, click the first real video, check); a listing of a browser window with no links says the page isn't readable and to take a screenshot. | It stopped at "I opened YouTube search results" and needed a second command ("Play") that did the inspect, screenshot and click. Nothing was missing from the tools; the model had no reason to think opening wasn't the end, and no way to let the page load. It is guidance, so it depends on the model following it; the E2E mock scenario checks that the chain works, not that a given model chooses it. |
 | A25 | The reply is checked against the command before it is accepted, but only after tools that may be just a step, at most twice, with a typed verdict and a confidence, from the user's own model, and it fails open. | Models stop early ("opened the search results" is not "playing it"), and a harness that trusts them can't fix it. A check on every command would add a request to each; a check that could block or loop would be worse than the problem. The check is another model call, so it can be wrong either way; that is why it can only add work the user asked for, twice, and never hold a reply back. |
 | A26 | The step limit rose from 12 to 20 (range 1–40), with a clock of nine seconds a step; the prompt teaches batching and the App Store install route; running out of steps says "say continue". A 12 saved under the old settings layout follows the new default once (`settingsVersion`). | "Install the YouTube app from the App Store" ran out of 12 steps: six went on the App Store *website* in Safari (open, wait, look, click, wait, inspect), then the real app took the rest, and it stopped after typing in the search box. Working inside an app costs many steps (open, wait, look, click, look), most of them cheap; the cap is a guard against runaways, not a target. Batching and the right route save more than a bigger number does. |
+| A27 | Whisper (WhisperKit, its model catalog, downloads, storage and Settings section) was removed; the speech engines are Apple's two. Settings saved with Whisper chosen load as Automatic. | The user asked for it: one less large dependency, no model to download, and nothing to keep in step with a library. Apple's engines are on-device and, on macOS 26, need no permission; they were already the default. |
+| A28 | The Voxa bar: a non-activating but key-able panel (field + microphone button) opened by ⌥⇧Space or the menu. The microphone button is **continuous listening**: every utterance is a command, there is no wake phrase, it is per session (never persisted, closes with the bar, stops after a silence, default ten minutes), and the microphone is closed while Voxa works or speaks. | The user asked for "a mic icon like Siri that listens continuously" instead of "Hey Voxa". An earlier build gated on a wake phrase; real speech-engine output for the made-up name "Voxa" varied by voice ("Vox", "Voxer", "Work, sir"), and matching it by sound still let ordinary words through ("Hey Vixen"). A button the person pressed, visibly, for as long as they want, is a clearer and safer contract than a guess about what was said. |
+| A29 | Siri hands a command to Voxa through an App Intent (`GiveVoxaACommand` in the app target, phrases "Ask/Tell Voxa", "Give Voxa a command"): Siri asks "What should Voxa do?" and passes the words to `SiriCommand`, which uses the session's normal command path. The intent requires an unlocked Mac. | Siri already has an always-on, on-device wake word and recognition; Voxa opens no microphone for it. It is two steps because App Shortcut phrases take no free text. The intent lives in the app target because the system reads App Intents from the app's own code. |
+| A30 | The end-to-end scripts run a private copy of the built app, and are told to build with their own `DERIVED_DATA`. | `scripts/build.sh` writes where `make run-signed` puts the user's app; the scripts once stopped it by path and replaced its Developer ID build with an ad-hoc one. |
+| A31 | There is one panel, not two: the bar carries everything Voxa shows (what it heard, progress, reply, problem, the confirmation card), and `CommandBarController` is what the session and the confirmations present to (`HUDPresenting`). It has two owners: the person (opened by the shortcut, the menu or the microphone: field, microphone, clicks) and a command (it shows the command, without the keyboard or clicks, and goes when it is over); the microphone being on makes it stay either way. It **can take the keyboard only while it is the person's and nothing is under way** (`HUDMode.isInFlight`), it gives the keyboard back the moment a command starts, and a question in it can be clicked but never typed at. Putting it away never takes a waiting question off the screen. | The user found the bar plain and its results in a separate window: "all the result should come in the bar, at least the design should be similar". Two panels also meant two places that could disagree (the HUD had to be pushed below the bar, and each had its own idea of clicks and keys). One card with one look, one orb whose colour says what Voxa is doing, and one set of rules for the keyboard is simpler to reason about, and the safety properties (a keystroke never lands in the bar while a command types elsewhere, a question is never answered by a stray key) are now properties of a single panel that a real-window test can pin. **Nothing in the bar animates by itself** (the user asked for the design without the motion): a first version with a turning orb, a glow running round the card and a shimmer cost 40 % of a core in the real app (an angular gradient is shaded on the CPU, pixel by pixel, every frame; a hidden window's clocks go on ticking; a repeat-forever animation updates the whole view graph on every frame the display has). What remains is the level meter, which follows the microphone at 15 bars a second (`HUDModel.levelInterval`, folding in the loudest level between two bars) and costs a few percent while it is listening and nothing otherwise. |
 
 ### Lesson: never let SwiftUI size a window through Auto Layout on macOS 26
 
@@ -560,7 +547,7 @@ real catalog. Any tool that reads the real system should have at least one test 
 | R1 | Ad-hoc signing changes the code hash on every rebuild, so TCC re-prompts. | Sign development builds with the Developer ID identity (`scripts/build.sh --sign-dev`). |
 | R2 | Carbon hotkeys can't be modifier-only, can lose a key-up (secure input, modifiers released first), and another app may already own the shortcut. | Events are forwarded as delivered and the session controller tolerates duplicates and missing releases (a stuck session ends at the recording limit or with Esc). Esc is registered only while a session needs it; conflicts are surfaced by the recorder. **No key-state polling**, see the lesson below. |
 | R3 | AirPods switching to the hands-free profile mid-start changes the audio format and stops the engine. | Tap format `nil`, converter rebuilt per format, engine restarted on configuration change. |
-| R4 | Prompt injection via screen, clipboard, web or script output, and **audio injection** (other voices reaching the mic). | Push-to-talk only (a spoken confirmation needs the hold too); untrusted-data envelope with a random boundary, invisible characters stripped; taint escalation; mandatory confirmation built from the tool's own description; injection tests at the policy, loop and live-app level; audit log. |
+| R4 | Prompt injection via screen, clipboard, web or script output, and **audio injection** (other voices reaching the mic). | The microphone is open only because the user asked (the key held, or the bar's microphone on for a session: see R19); a spoken confirmation is never accepted, because the microphone is closed while a command runs and an Allow card answers only to a click or a chord; untrusted-data envelope with a random boundary, invisible characters stripped; taint escalation; mandatory confirmation built from the tool's own description; injection tests at the policy, loop and live-app level; audit log. |
 | R5 | The app is not sandboxed (Accessibility and Apple Events need that), so the policy engine is the security boundary. | Deny-by-default patterns, exhaustive policy tests, append-only audit log. |
 | R6 | Swift 6 strict concurrency versus AVFoundation and Speech types that aren't `Sendable`. | Confined to actors or small `@unchecked Sendable` boxes, each documented and lock-protected. |
 | R7 | Speech and audio behavior that can only be verified with real hardware and permissions. | Manual QA checklist in the README; `voxa-dev` exercises engines without a person. |
@@ -572,9 +559,11 @@ real catalog. Any tool that reads the real system should have at least one test 
 | R13 | Synthetic input lands in whatever has the keyboard focus, and macOS drops it silently without Accessibility. | The permission gate runs first; the app in front is checked before every action; the window under a mouse click must belong to that app. |
 | R14 | Real screen capture, real synthetic input and the real Accessibility tree can't be exercised without the user's grants. | Logic tested against a pretend desktop; the real capture was run once on a window of the test's own (colours and coordinates checked); the rest is on the manual QA list. |
 | R15 | Moving files can lose work if the path is wrong or the disk changes under the card. | Canonical paths and plain rules; never replaces or deletes; the plan is made again when the action runs; results say how far it got. |
-| R16 | WhisperKit adds a large dependency, needs a model that has to be downloaded, and its accuracy on short commands varies with the model. | Contained in one module; downloads only on request with sizes shown; Apple's engines remain the default; silence is never sent to it. A real transcription hasn't been run (it needs the download). |
+| R16 | *(Gone with A27.)* WhisperKit was a large dependency with a model to download. | Removed. |
 | R17 | With full control on, a fooled model acts without anyone seeing it first: a web page, email or file that carries an instruction can have it followed, including running an AppleScript or a Shortcut, changing the Mac's settings, or sending what was read to a link. | The user chooses it, is told so when turning it on, and can see it is on (menu bar, Tools tab, History, which keeps what was asked of each tool). Refusals stay (the analyzer's routes to a shell, password fields, terminals, hidden paths, Voxa's own windows); the model is told to take care; Esc stops a command. Residual: everything that would have asked, and a script written to slip past the analyzer, which is a speed bump and nothing more. |
 | R18 | The completion check is a model call, so it can be wrong: a false "not finished" makes the model do extra, a false "finished" lets an incomplete reply through, and the reply it judges could try to steer it. | It only ever adds steps for the user's own command, twice at most, and those steps go through the usual policy. It sees no tool output, wraps the reply and step names as data, and its "what is left" is cleaned (no addresses) before it becomes a note. A confidence under 0.5 does nothing. Residual: a check fooled into "finished" changes nothing; one fooled into "not finished" costs up to two extra rounds. |
+| R19 | While the bar's microphone is on, **everything heard is a command**: another person, a video, a call. With full control on, that runs without asking. | It is the person's explicit, visible, per-session choice (the bar stays on screen, the menu-bar icon and macOS's dot show it, it is never saved, it stops after a silence and when the bar closes); the bar warns in orange when full control is on; the policy, refusals and Allow cards apply as ever; and no spoken word can approve anything (the microphone is closed while a command runs). It cannot tell the owner's voice from another. |
+| R20 | Siri: anyone within earshot of a Mac that is listening for "Hey Siri" can say "ask Voxa" and a command. | The shortcut requires an unlocked Mac (`requiresLocalDeviceAuthentication`); Siri's own wake-word handling and voice recognition apply; the command goes through the same policy, refusals and Allow cards, and Siri's words can't answer one. With full control on it is as exposed as R19. |
 
 ## 7. Milestones
 
@@ -583,5 +572,5 @@ real catalog. Any tool that reads the real system should have at least one test 
 | M1 | Menu-bar shell, hotkey, audio capture, Apple STT, HUD with live transcript | done |
 | M2 | LLMClient, agent loop, open_app / open_url / run_shortcut / run_applescript, policy engine, confirmation HUD | done |
 | M3 | PermissionsManager + onboarding, calendar / reminders / clipboard / context tools, TTS, full settings, audit viewer | done |
-| M4 | Accessibility UI tools, screenshot + vision fallback, file tools, WhisperKit engine | done |
+| M4 | Accessibility UI tools, screenshot + vision fallback, file tools | done |
 | M5 | Hardening, tests, signing and notarization scripts, README, DMG | next |
