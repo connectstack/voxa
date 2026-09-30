@@ -131,6 +131,10 @@ answer allow
 check "once allowed it finishes the job in the same command, and the second check says so" \
     "$(audit_has "$MARK" toolResult ui_click ok && audit_has "$MARK" completionCheck "" done && reply_has "Playing" && echo 0 || echo 1)"
 
+ask "ui batch"
+check "three calls sent together in one turn all run, in order, and the whole job took two requests: one step for the calls" \
+    "$(audit_has "$MARK" toolResult wait ok && audit_has "$MARK" toolResult ui_inspect ok && audit_has "$MARK" toolResult ui_press_keys ok && reply_has "three things" && [[ "$(requests_for 'ui batch')" == "2" ]] && echo 0 || echo 1)"
+
 ask "ui looked"
 check "a model that looked at the result of what it did is not second-guessed: no check, and its reply stands" \
     "$(! audit_has "$MARK" completionCheck && audit_has "$MARK" toolResult screenshot ok && reply_has "Done" && echo 0 || echo 1)"

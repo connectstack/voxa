@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import VoxaAgent
 import VoxaCore
@@ -98,7 +99,7 @@ struct AgentLoopBasicsTests {
         let request = harness.llm.requests[0]
         #expect(request.model == "claude-sonnet-5-5")
         #expect(request.effort == .medium)
-        #expect(request.system == [SystemBlock("You are a test. At most 12 steps.")])
+        #expect(request.system == [SystemBlock("You are a test. At most 20 steps.")])
         #expect(request.tools.map(\.name) == ["look_up"])
         #expect(request.messages.count == 1)
         let first = request.messages[0].content
@@ -187,6 +188,27 @@ struct AgentLoopBasicsTests {
 @Suite("AgentLoop: tools")
 @MainActor
 struct AgentLoopToolTests {
+    @Test("calls sent together in one turn run in order and count as one step, so a job of three calls needs two steps, not four")
+    func batchedCallsAreOneStep() async {
+        let order = OSAllocatedUnfairLock(initialState: [String]())
+        func recording(_ name: String) -> StubTool {
+            StubTool(name, risk: .readOnly, run: { _ in
+                order.withLock { $0.append(name) }
+                return .text("ok")
+            })
+        }
+        let calls: [(name: String, input: JSONValue, id: String?)] = [("open_it", [:], "a"), ("wait_it", [:], "b"), ("look_it", [:], "c")]
+        let harness = LoopHarness(
+            [.response(.calls(calls)), .response(.say("Done."))],
+            tools: [recording("open_it"), recording("wait_it"), recording("look_it")]
+        )
+        let output = await harness.run()
+
+        #expect(output.result.steps == 2 && harness.llm.requestCount == 2)
+        #expect(order.withLock { $0 } == ["open_it", "wait_it", "look_it"])
+        #expect(harness.llm.requests[1].toolResults.count == 3, "all three results go back in the one message")
+    }
+
     @Test("a read-only tool runs at once and its result goes back to the model")
     func readOnly() async {
         let tool = stub("look_up", .readOnly, result: .text("42"))

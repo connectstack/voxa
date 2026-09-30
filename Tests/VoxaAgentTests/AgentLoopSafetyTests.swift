@@ -27,6 +27,37 @@ struct AgentLoopLimitsTests {
         #expect(output.memory.messages.last?.role == .assistant)
     }
 
+    @Test("the reply for a run that used all its steps says how many, and how to carry on")
+    func limitReplyIsActionable() {
+        let reply = L10n.Agent.limitReached(20)
+        #expect(reply.contains("20") && reply.contains("“continue”"))
+    }
+
+    @Test("saying continue after the limit carries on from where it stopped, with the whole conversation kept")
+    func continueAfterTheLimit() async throws {
+        let tool = stub("look_up", .readOnly)
+        let settings = AppSettings(localeIdentifier: "en_US", maxAgentSteps: 2)
+        let first = LoopHarness([.response(.call("look_up")), .response(.call("look_up"))], tools: [tool], settings: settings)
+        let stopped = await first.run("do the long thing")
+        #expect(stopped.result.outcome == .limitReached(steps: 2))
+
+        let second = LoopHarness([.response(.say("Finished."))], tools: [tool], settings: settings)
+        let resumed = await second.run("continue", memory: stopped.memory)
+        #expect(resumed.result.outcome == .completed && resumed.result.reply == "Finished.")
+
+        let request = try #require(second.llm.requests.first)
+        #expect(request.messages.count == stopped.memory.messages.count + 1, "everything so far, and the new word")
+        guard case .text(let last)? = request.messages.last?.content.first else {
+            Issue.record("the last message isn't text")
+            return
+        }
+        #expect(last.hasSuffix("continue"))
+        let knowsItStopped = request.messages.contains { message in
+            message.content.contains { if case .text(let text) = $0 { text.contains("I used all 2 steps") } else { false } }
+        }
+        #expect(knowsItStopped, "the model can see that it ran out of steps, and what it had done")
+    }
+
     @Test("a command that takes too long is stopped, and the request is cancelled")
     func totalTimeout() async {
         let harness = LoopHarness([.hold], limits: AgentLimits(totalTimeout: .seconds(120)))

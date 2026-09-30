@@ -25,11 +25,11 @@ struct AppSettingsTests {
         #expect(defaults.confirmationStrictness == .standard)
         #expect(defaults.disabledTools.isEmpty)
         #expect(defaults.useRefusalFallback)
-        #expect(defaults.maxAgentSteps == 12)
+        #expect(defaults.maxAgentSteps == 20)
         #expect(defaults.followUpWindowSeconds == 120)
 
         let extreme = try decode(#"{"maxAgentSteps": 9999, "followUpWindowSeconds": -5, "model": "   "}"#)
-        #expect(extreme.maxAgentSteps == 25)
+        #expect(extreme.maxAgentSteps == 40)
         #expect(extreme.followUpWindowSeconds == 0)
         #expect(extreme.model == "claude-sonnet-5-5", "a blank model name falls back to the default")
         #expect(try decode(#"{"maxAgentSteps": 0}"#).maxAgentSteps == 1)
@@ -48,6 +48,26 @@ struct AppSettingsTests {
         }
         // A bad value doesn't take the other settings with it.
         #expect(try decode(#"{"fullControl": "yes", "model": "claude-opus-5-5"}"#).model == "claude-opus-5-5")
+    }
+
+    @Test("the steps a command may take default to 20, and a 12 saved before that default rose follows it, once")
+    func stepsDefault() throws {
+        #expect(AppSettings().maxAgentSteps == AppSettings.defaultMaxAgentSteps && AppSettings.defaultMaxAgentSteps == 20)
+        #expect(AppSettings.maxAgentStepsRange == 1...40)
+        // Saved under the old layout (no version) and still 12: it was never chosen, so it follows the default.
+        #expect(try decode(#"{"maxAgentSteps": 12}"#).maxAgentSteps == 20)
+        // Anything else that was saved is what the user chose.
+        #expect(try decode(#"{"maxAgentSteps": 15}"#).maxAgentSteps == 15)
+        #expect(try decode(#"{"maxAgentSteps": 25}"#).maxAgentSteps == 25)
+        // Saved under the new layout, a 12 is a choice and stays, through any number of saves and loads.
+        var chosen = AppSettings(maxAgentSteps: 12)
+        for _ in 0..<3 {
+            chosen = try JSONDecoder().decode(AppSettings.self, from: try JSONEncoder().encode(chosen))
+        }
+        #expect(chosen.maxAgentSteps == 12 && chosen.settingsVersion == AppSettings.currentVersion)
+        #expect(try decode(#"{"maxAgentSteps": 12, "settingsVersion": 2}"#).maxAgentSteps == 12)
+        // Nothing saved at all is simply the default.
+        #expect(try decode("{}").maxAgentSteps == 20)
     }
 
     @Test("the completion check is on by default, and a bad value leaves it on")

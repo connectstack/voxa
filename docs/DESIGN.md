@@ -139,7 +139,11 @@ struct AgentLimits { perToolTimeout = 30s; totalTimeout = 120s (not counting con
 
 ## The agent loop
 
-One spoken command becomes a loop of at most `maxAgentSteps` (default 12) model turns:
+One spoken command becomes a loop of at most `maxAgentSteps` (default 20, up to 40) model turns. A *step* is one turn of the
+model, however many tools it calls in it: calls in one turn run in order and their results go back together, so independent
+calls (open, wait, look) sent together cost one step, and the prompt says to send them that way. The command's clock is at least
+nine seconds a step (three minutes at 20). When the limit is reached the reply says so and tells the user to say "continue",
+which resumes from the same conversation (the follow-up window keeps it):
 
 1. Send the conversation (static system prompt, tools sorted by name, the user turn with the time context) and stream the
    answer. Nothing runs until a *complete* message has arrived, so a failed or dropped request is always safe to repeat.
@@ -495,6 +499,7 @@ runtime, filled in with the step cap, and kept **static**. Tests pin the safety 
 | A23 | Full control is one switch in Settings → Safety, off by default, asked about before it turns on, visible in the menu bar with a way to switch it off, and marked in History. It leaves refusals alone; nothing else asks, scripts and system-changing apps included. | The user asked not to be asked, and said a version that still asked for scripts and system apps would be "a manual agent, not an automation agent". Removing the questions is their call, made knowingly (the question before it turns on names scripts and changes to the Mac); removing the refusals (password fields, terminals, shell access, hidden paths, Voxa's own windows) is not what the switch is for. |
 | A24 | "Play X on YouTube" must be one command: `open_url` says it only opened the page (and that it may still be loading); a `wait` tool (read-only, 1–10 s) lets the page draw; the prompt says to finish the job, that a results page plays nothing, and gives the YouTube recipe (results URL with the video filter, wait, screenshot, click the first real video, check); a listing of a browser window with no links says the page isn't readable and to take a screenshot. | It stopped at "I opened YouTube search results" and needed a second command ("Play") that did the inspect, screenshot and click. Nothing was missing from the tools; the model had no reason to think opening wasn't the end, and no way to let the page load. It is guidance, so it depends on the model following it; the E2E mock scenario checks that the chain works, not that a given model chooses it. |
 | A25 | The reply is checked against the command before it is accepted, but only after tools that may be just a step, at most twice, with a typed verdict and a confidence, from the user's own model, and it fails open. | Models stop early ("opened the search results" is not "playing it"), and a harness that trusts them can't fix it. A check on every command would add a request to each; a check that could block or loop would be worse than the problem. The check is another model call, so it can be wrong either way; that is why it can only add work the user asked for, twice, and never hold a reply back. |
+| A26 | The step limit rose from 12 to 20 (range 1–40), with a clock of nine seconds a step; the prompt teaches batching and the App Store install route; running out of steps says "say continue". A 12 saved under the old settings layout follows the new default once (`settingsVersion`). | "Install the YouTube app from the App Store" ran out of 12 steps: six went on the App Store *website* in Safari (open, wait, look, click, wait, inspect), then the real app took the rest, and it stopped after typing in the search box. Working inside an app costs many steps (open, wait, look, click, look), most of them cheap; the cap is a guard against runaways, not a target. Batching and the right route save more than a bigger number does. |
 
 ### Lesson: never let SwiftUI size a window through Auto Layout on macOS 26
 

@@ -144,6 +144,15 @@ answer() {
 }
 finished() { audit_has "$MARK" reply || audit_has "$MARK" failure; }
 
+# requests_for <command>: how many requests the model was sent for that command (its turns, not the completion check's).
+requests_for() {
+    python3 - "$WORK/requests.jsonl" "$1" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+print(sum(1 for r in rows if r.get("command") == sys.argv[2]))
+PY
+}
+
 # The mock's own log: was every request a valid one?
 requests_valid() { # requests_valid <dialect>
     python3 - "$WORK/requests.jsonl" "$1" <<'PY'

@@ -27,6 +27,12 @@ public enum ReasoningEffort: String, Codable, CaseIterable, Sendable, Identifiab
 /// Decoding is deliberately forgiving: a missing or unrecognized key falls back to its default instead of failing,
 /// so adding a setting in a later release (or downgrading) never wipes the user's other preferences.
 public struct AppSettings: Codable, Equatable, Sendable {
+    /// A step is one turn of the model, however many tools it calls in it. Working inside an app takes many (open, wait, look,
+    /// click, look again), so this is generous: it is a ceiling against runaways, not a target.
+    public static let defaultMaxAgentSteps = 20
+    public static let maxAgentStepsRange = 1...40
+    /// The layout these settings were saved in. Lets a default that changed be applied once to settings saved under the old one.
+    public static let currentVersion = 2
     public static let defaultMaxRecordingSeconds = 60
     public static let defaultModel = "claude-sonnet-5-5"
     /// OpenAI's efficient model: quick and inexpensive, which suits a voice interface. Any model ID can be typed instead.
@@ -48,6 +54,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         if let region = current.region?.identifier { return "\(language)_\(region)" }
         return language
     }
+
+    /// Which version of Voxa's settings layout this was saved in (see `currentVersion`).
+    public private(set) var settingsVersion: Int
 
     // MARK: Speech
 
@@ -128,7 +137,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         ollamaContextLength: Int = AppSettings.defaultOllamaContextLength,
         effort: ReasoningEffort = .medium,
         useRefusalFallback: Bool = true,
-        maxAgentSteps: Int = 12,
+        maxAgentSteps: Int = AppSettings.defaultMaxAgentSteps,
         followUpWindowSeconds: Int = 120,
         speakReplies: Bool = true,
         voiceIdentifier: String = "",
@@ -139,6 +148,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         disabledTools: Set<String> = [],
         onboardingCompleted: Bool = false
     ) {
+        self.settingsVersion = Self.currentVersion
         self.speechEngine = speechEngine
         self.localeIdentifier = localeIdentifier
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -168,6 +178,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var locale: Locale { Locale(identifier: localeIdentifier) }
 
     private enum CodingKeys: String, CodingKey {
+        case settingsVersion
         case speechEngine, localeIdentifier, maxRecordingSeconds, downloadSpeechModel, whisperModel
         case provider, model, openAIModel, openAIBaseURL, ollamaModel, ollamaBaseURL, ollamaContextLength
         case effort, useRefusalFallback, maxAgentSteps, followUpWindowSeconds
@@ -205,7 +216,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         ollamaContextLength = min(max(value(.ollamaContextLength, defaults.ollamaContextLength), 2_048), 131_072)
         effort = value(.effort, defaults.effort)
         useRefusalFallback = value(.useRefusalFallback, defaults.useRefusalFallback)
-        maxAgentSteps = min(max(value(.maxAgentSteps, defaults.maxAgentSteps), 1), 25)
+        // The default rose from 12 to 20. A 12 saved under the old layout was never chosen, so it follows the default, once:
+        // from then on the version is saved with it, and a 12 the user picks stays.
+        var steps = value(.maxAgentSteps, defaults.maxAgentSteps)
+        if value(.settingsVersion, 1) < 2, steps == 12 { steps = defaults.maxAgentSteps }
+        maxAgentSteps = min(max(steps, Self.maxAgentStepsRange.lowerBound), Self.maxAgentStepsRange.upperBound)
+        settingsVersion = Self.currentVersion
         followUpWindowSeconds = min(max(value(.followUpWindowSeconds, defaults.followUpWindowSeconds), 0), 600)
 
         speakReplies = value(.speakReplies, defaults.speakReplies)

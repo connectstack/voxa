@@ -42,7 +42,7 @@ struct SafetySettingsView: View {
                     Text(L10n.SettingsModel.followUp(store.current.followUpWindowSeconds))
                 }
                 Text(L10n.SettingsModel.followUpHelp).font(.caption).foregroundStyle(.secondary)
-                Stepper(value: $store.current.maxAgentSteps, in: 1...25) {
+                Stepper(value: $store.current.maxAgentSteps, in: AppSettings.maxAgentStepsRange) {
                     Text(L10n.SettingsModel.maxSteps(store.current.maxAgentSteps))
                 }
             }

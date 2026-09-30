@@ -271,7 +271,9 @@ exhaustively tested. The rules, all in force in this milestone:
 - **Links are vetted.** Web, mail, phone, message and map links only; never `file:` or a custom scheme; credentials in an
   address, backslashes and encoded host names are refused; local-network addresses, bare IPs, look-alike names and
   data-stuffed addresses need your OK.
-- **Bounded.** At most 12 steps, 30 seconds per action, 2 minutes per command (not counting time spent deciding), and two
+- **Bounded.** At most 20 steps (*Settings → Safety → Steps per command*, up to 40; a step is one turn of the model, however many
+  tools it calls in it, and it is told to send calls that don't depend on each other together), 30 seconds per action, about
+  nine seconds a step for the whole command (three minutes at 20; not counting time spent deciding), and two
   refusals end the command. Esc stops everything, including a running script.
 - **Append-only audit log** of commands, tool calls, decisions and your answers: `~/Library/Application Support/Voxa/audit.jsonl`
   (private to you, JSON Lines, capped at 5 MB). It holds no tool output and no key. **Settings → History** shows it grouped by
@@ -309,7 +311,7 @@ exhaustively tested. The rules, all in force in this milestone:
 ## Development
 
 ```bash
-make test         # unit tests (1,160 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
+make test         # unit tests (1,165 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
 make lint         # SwiftLint
 make format       # SwiftFormat
 make snapshots    # render the HUD in every state, light and dark, to build/snapshots

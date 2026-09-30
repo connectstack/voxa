@@ -59,6 +59,7 @@ Commands are answered by keyword:
     "ui lazy"           a model that stops early: presses a key, says "Pressed it." and stops. Voxa's completion check (answered by
                         this mock) sends it back, and then it takes a screenshot, clicks, and says "Playing it."
     "ui looked"         a model that looks at the result of what it did before replying, so there is nothing for a check to add
+    "ui batch"          three tool calls in ONE turn (wait, ui_press_keys, ui_inspect), then a reply: two model requests in all
     "find invoices"     file_search for PDF invoices
     "trash screenshots" file_search for screenshots on the Desktop, then file_trash on what it found (needs confirmation)
     "move report"       file_move ~/Downloads/report.pdf into ~/Documents/Invoices (needs confirmation)
@@ -284,6 +285,12 @@ def windows_and_files_scenario(c, command, turn, results, joined, declined, bloc
         if turn == 3:
             return [tool("ui_click", {"screenshot": "s1", "x": 825, "y": 22})], "tool_use"
         return [text("Playing it.")], "end_turn"
+    if "ui batch" in c:
+        # A step is one turn of the model, however many tools it calls in it: this is a whole job in two requests.
+        if turn == 0:
+            # (Pressing before inspecting: what a listing brings in taints the conversation, and the press would then ask.)
+            return [tool("wait", {"seconds": 1}), tool("ui_press_keys", {"keys": ["cmd+l"]}), tool("ui_inspect", {})], "tool_use"
+        return [text("Did three things.")], "end_turn"
     if "ui looked" in c:
         if turn == 0:
             return [tool("ui_press_keys", {"keys": ["cmd+l"]})], "tool_use"

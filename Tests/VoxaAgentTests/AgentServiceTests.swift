@@ -151,6 +151,18 @@ struct AgentServiceTests {
         #expect(await first.value.outcome == .cancelled)
     }
 
+    @Test("a command that may take many steps gets a clock to match: nine seconds a step, never less than two minutes")
+    func clockFollowsSteps() async {
+        let (service, _) = service([])
+        #expect(await service.limits(for: .anthropic, steps: 5).totalTimeout == .seconds(120))
+        #expect(await service.limits(for: .anthropic, steps: 12).totalTimeout == .seconds(120))
+        #expect(await service.limits(for: .anthropic, steps: 20).totalTimeout == .seconds(180))
+        #expect(await service.limits(for: .anthropic, steps: 40).totalTimeout == .seconds(360))
+        let local = await service.limits(for: .ollama, steps: 5).totalTimeout
+        #expect(local == AgentService.localModelTimeout, "a local model gets longer still")
+        #expect(await service.limits(for: .anthropic).totalTimeout == .seconds(180), "the default number of steps is 20")
+    }
+
     @Test("with every tool switched off it says so instead of calling the model")
     func everythingOff() async {
         let (service, llm) = service(

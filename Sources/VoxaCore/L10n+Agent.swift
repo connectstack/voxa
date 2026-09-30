@@ -89,7 +89,7 @@ extension L10n {
         }
         public static func limitReached(_ steps: Int) -> String {
             String(
-                localized: "I couldn't finish that in \(steps) steps, so I stopped. Part of it may have been done.",
+                localized: "I used all \(steps) steps and I'm not finished. Say “continue” and I'll carry on from here.",
                 comment: "Reply when the step limit is reached. The argument is the limit"
             )
         }

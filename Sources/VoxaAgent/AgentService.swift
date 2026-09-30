@@ -84,7 +84,7 @@ public actor AgentService {
             audit: audit,
             systemPrompt: systemPrompt,
             clock: clock,
-            limits: limits(for: configuration.provider),
+            limits: limits(for: configuration.provider, steps: configuration.maxSteps),
             fullControlStillOn: { [settings] in await settings().fullControl },
             verifier: LLMCompletionVerifier(llm: llm)
         )
@@ -101,13 +101,18 @@ public actor AgentService {
 
     /// A model on this Mac may need to load before it answers and then generates slowly, so a command gets longer to finish
     /// than one sent over the network. The other limits, and the user's own time to decide, are unchanged.
-    func limits(for provider: ModelProvider) -> AgentLimits {
-        guard provider == .ollama else { return limits }
+    func limits(for provider: ModelProvider, steps: Int = AppSettings.defaultMaxAgentSteps) -> AgentLimits {
         var adjusted = limits
-        adjusted.totalTimeout = max(limits.totalTimeout, Self.localModelTimeout)
+        // A command allowed many steps needs a clock to match: a step is a model turn and a tool that may wait for a page.
+        adjusted.totalTimeout = max(limits.totalTimeout, .seconds(steps * Self.secondsPerStep))
+        guard provider == .ollama else { return adjusted }
+        adjusted.totalTimeout = max(adjusted.totalTimeout, Self.localModelTimeout)
         adjusted.checkTimeout = max(limits.checkTimeout, Self.localModelCheckTimeout)
         return adjusted
     }
+
+    /// About what one step takes over the network; the command's time limit is at least this many seconds for each step it may use.
+    static let secondsPerStep = 9
 
     static let localModelTimeout: Duration = .seconds(300)
     /// A local model may have to load before it can answer even a short question.
