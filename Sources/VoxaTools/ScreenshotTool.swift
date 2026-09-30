@@ -28,8 +28,7 @@ public struct ScreenshotTool: TypedTool {
     ])
     public let baselineRisk = RiskLevel.reversible
     public let requiredPermissions: Set<PermissionKind> = [.screenRecording]
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
+    public let stepKind = TaskStepKind.looks
 
     private let capturer: any ScreenCapturing
     private let apps: any FrontmostAppProviding

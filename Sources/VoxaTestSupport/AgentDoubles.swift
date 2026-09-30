@@ -162,8 +162,8 @@ public struct StubTool: AgentTool {
     public var inputSchema: JSONValue
     public var baselineRisk: RiskLevel
     public var requiredPermissions: Set<PermissionKind> = []
-    /// Set on a stub that stands for opening a page or clicking: a step, not the whole job.
-    public var mayLeaveTaskUnfinished = false
+    /// Set on a stub that stands for opening a page, clicking or looking: a step, not the whole job.
+    public var stepKind = TaskStepKind.other
     public var assessment: @Sendable (JSONValue) throws -> ToolAssessment
     public var behavior: @Sendable (JSONValue) async throws -> ToolResult
     public let recorder = ToolRecorder()

@@ -65,18 +65,19 @@ struct StandardToolsTests {
         #expect(ToolRegistry([]).definitions().isEmpty)
     }
 
-    @Test("the tools that may be only a step towards what was asked are the ones that open, look and drive, and no others")
-    func stepsNotOutcomes() {
-        let steps = Set(tools.filter(\.mayLeaveTaskUnfinished).map(\.name))
-        #expect(
-            steps == [
-                "open_app", "open_url", "wait", "run_shortcut", "run_applescript", "screenshot", "ui_inspect", "ui_click", "ui_type",
-                "ui_press_keys",
-            ]
-        )
-        // These finish what they were asked to do, so the command needs no second look after them.
-        for name in ["calendar_create_event", "calendar_delete_event", "reminders_create", "clipboard_write", "file_move", "file_trash"] {
-            #expect(!steps.contains(name), "\(name)")
+    @Test("the tools that are only a step towards what was asked say whether they open, act or look, and no others do")
+    func stepKinds() {
+        func names(_ kind: TaskStepKind) -> Set<String> { Set(tools.filter { $0.stepKind == kind }.map(\.name)) }
+        #expect(names(.opens) == ["open_app", "open_url"])
+        #expect(names(.acts) == ["run_shortcut", "run_applescript", "ui_click", "ui_type", "ui_press_keys"])
+        #expect(names(.looks) == ["ui_inspect", "screenshot"])
+        // These finish what they were asked to do (or only pass time), so a command needs no second look after them.
+        let others = names(.other)
+        let finished = [
+            "calendar_create_event", "calendar_delete_event", "reminders_create", "clipboard_write", "file_move", "file_trash", "wait",
+        ]
+        for name in finished {
+            #expect(others.contains(name), "\(name)")
         }
     }
 

@@ -71,8 +71,7 @@ public struct RunShortcutTool: TypedTool {
     /// A Shortcut can do anything, and Voxa can't see inside one.
     public let baselineRisk = RiskLevel.sensitive
     public let requiredPermissions: Set<PermissionKind> = []
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
+    public let stepKind = TaskStepKind.acts
 
     private let runner: any ProcessRunning
     private let timeout: Duration

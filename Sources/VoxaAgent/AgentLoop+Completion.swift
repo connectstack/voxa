@@ -5,10 +5,14 @@ import VoxaLLM
 /// Checking that a command is really finished before its reply is accepted.
 ///
 /// Models tend to stop at the first step that looks like an answer: "Play X on YouTube" ends at "I opened the search results".
-/// When the model stops and the run used a tool that may be only a step (opening a page, clicking), the reply goes to a checker
-/// first. If the checker finds something plainly still left, the model is sent back to it with a note; otherwise the reply
-/// stands. The check can only ever *add* work that the user's own command asked for, it never ends a command early, and when it
-/// can't be made the reply stands.
+/// When the model stops and the run opened or did something (a page, a click), the reply goes to a checker first. If the checker
+/// finds something plainly still left, the model is sent back to it with a note; otherwise the reply stands. The check can only
+/// ever *add* work that the user's own command asked for, it never ends a command early, and when it can't be made the reply
+/// stands.
+///
+/// It is left out where it could only be wrong. The checker can't see the screen, so when the model has itself looked at the
+/// result of its last action there is nothing more to ask; and a model that was sent back and answered again without doing
+/// anything new has said what it thinks, so it isn't sent back a second time over the same thing.
 extension AgentLoop {
     /// The most times one command is sent back to work. Two covers "open it, then play it"; more would mean the checker and the
     /// model disagree about a command, and the user is better served by the answer they have.
@@ -32,13 +36,18 @@ extension AgentLoop {
         guard let verifier, run.configuration.verifyCompletion else { return nil }
         // Only when the model can still act on it: a step left, time left, the user not having said no to something on the way.
         guard run.checks < Self.maxChecks, run.steps < run.configuration.maxSteps, run.declines == 0 else { return nil }
-        // Only when a tool ran that may be only a step: an event that was added, or a question answered, needs no second look.
-        guard run.trace.contains(where: \.mayLeaveTaskUnfinished) else { return nil }
+        // Only when something was opened or done in it: an event that was added, or a question answered, needs no second look.
+        guard run.trace.contains(where: { $0.kind == .opens || $0.kind == .acts }) else { return nil }
+        // Not when the model has looked at what its last action did: the checker could only guess at what it saw.
+        guard !Self.verifiedByLooking(run.trace) else { return nil }
+        // Not twice over the same steps: sent back, and answered again with nothing new done, the model has made its case.
+        guard run.checks == 0 || run.trace.count > run.stepsAtLastCheck else { return nil }
         let reply = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !reply.isEmpty, !Self.asksSomething(reply) else { return nil }
         guard await run.deadline.remaining() >= limits.checkTimeout + Self.timeToActOnACheck else { return nil }
 
         run.checks += 1
+        run.stepsAtLastCheck = run.trace.count
         // The reply the model has been streaming is not final until the check says so.
         run.emit(.thinking(step: run.steps))
         let evidence = CompletionEvidence(
@@ -72,6 +81,15 @@ extension AgentLoop {
             detail: verdict.shouldContinue ? verdict.missing : nil
         )
         return verdict.shouldContinue ? verdict.missing : nil
+    }
+
+    /// Whether the last thing the model did in an app was followed by a look at the result: an action, then a listing or a
+    /// picture. (Opening something and then looking is not enough: the model may have stopped at the page it opened.)
+    static func verifiedByLooking(_ trace: [Run.Step]) -> Bool {
+        guard let last = trace.lastIndex(where: { $0.kind == .opens || $0.kind == .acts }), trace[last].kind == .acts else {
+            return false
+        }
+        return trace[(last + 1)...].contains { $0.kind == .looks && $0.succeeded }
     }
 
     /// A reply that asks the user something is waiting for them, not for a tool.

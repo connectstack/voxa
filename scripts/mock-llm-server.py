@@ -56,8 +56,9 @@ Commands are answered by keyword:
     "shot screen"       screenshot of the whole screen (needs confirmation)
     "shot click"        screenshot, then ui_click on the Reload button at its place in the picture
     "ui play"           wait for the page, screenshot, then ui_click in the picture, all in one command (a model that finishes the job)
-    "ui lazy"           a model that stops early: waits, says "Waited." and stops. Voxa's completion check (answered by this mock)
-                        sends it back, and then it takes a screenshot, clicks, and says "Playing it."
+    "ui lazy"           a model that stops early: presses a key, says "Pressed it." and stops. Voxa's completion check (answered by
+                        this mock) sends it back, and then it takes a screenshot, clicks, and says "Playing it."
+    "ui looked"         a model that looks at the result of what it did before replying, so there is nothing for a check to add
     "find invoices"     file_search for PDF invoices
     "trash screenshots" file_search for screenshots on the Desktop, then file_trash on what it found (needs confirmation)
     "move report"       file_move ~/Downloads/report.pdf into ~/Documents/Invoices (needs confirmation)
@@ -275,14 +276,20 @@ def windows_and_files_scenario(c, command, turn, results, joined, declined, bloc
     if "ui lazy" in c:
         # A model that stops at its first step. Voxa's check finds the job unfinished and sends it back with a note.
         if turn == 0:
-            return [tool("wait", {"seconds": 1})], "tool_use"
+            return [tool("ui_press_keys", {"keys": ["cmd+l"]})], "tool_use"
         if turn == 1:
-            return [text("Waited.")], "end_turn"
+            return [text("Pressed it.")], "end_turn"
         if turn == 2:
             return [tool("screenshot", {})], "tool_use"
         if turn == 3:
             return [tool("ui_click", {"screenshot": "s1", "x": 825, "y": 22})], "tool_use"
         return [text("Playing it.")], "end_turn"
+    if "ui looked" in c:
+        if turn == 0:
+            return [tool("ui_press_keys", {"keys": ["cmd+l"]})], "tool_use"
+        if turn == 1:
+            return [tool("screenshot", {})], "tool_use"
+        return [text("Done.")], "end_turn"
     if "shot window" in c or "shot screen" in c:
         if turn == 0:
             return [tool("screenshot", {"scope": "screen"} if "screen" in c else {})], "tool_use"

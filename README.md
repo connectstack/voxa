@@ -257,8 +257,10 @@ exhaustively tested. The rules, all in force in this milestone:
   page or an app, waiting, looking, clicking, typing, a script), the reply is first put to a short separate request to the same
   model, with no tools: *given what the user said, the names of what was done, and this reply, is anything they asked for plainly
   still left?* It answers in a fixed shape (done or not, what is left, how sure). If something is left and it is sure, the model
-  is sent back to finish, at most twice, with a note that can only ask for the user's own command; if the check can't be made,
-  or the model asked you a question, or you said no to something on the way, the reply stands. The check never sees what a page,
+  is sent back to finish, at most twice, with a note that can only ask for the user's own command. The reply stands if the check
+  can't be made, if the model asked you a question, if you said no to something on the way, if the model itself looked at the
+  result of its last action (the check can't see the screen either), or if it was sent back and answered again with nothing new
+  done: it has made its case. The check never sees what a page,
   window or file returned, only your words, the names of the steps (as data) and the reply. It costs one short extra request
   after such commands; *Settings → Safety → Check that a command is finished* turns it off, and History shows each check.
 - **You see the real thing.** The card is written by the tool's own code from the validated arguments: the whole script,
@@ -307,7 +309,7 @@ exhaustively tested. The rules, all in force in this milestone:
 ## Development
 
 ```bash
-make test         # unit tests (1,154 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
+make test         # unit tests (1,160 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
 make lint         # SwiftLint
 make format       # SwiftFormat
 make snapshots    # render the HUD in every state, light and dark, to build/snapshots

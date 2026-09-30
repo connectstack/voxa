@@ -432,9 +432,15 @@ separate short request: no tools, low effort, one JSON object back. Because it i
 could replace it without the loop changing.
 
 **When.** In `AgentLoop`, where the model's turn would end the command (`concludeOrContinue`): only if a tool ran that declares
-`mayLeaveTaskUnfinished` (open_app, open_url, wait, ui_*, screenshot, run_applescript, run_shortcut: steps, unlike
-"add an event", which is the whole job); the reply doesn't ask the user something; the user hasn't declined anything; a step and
-enough time (check timeout + 15 s) remain; fewer than two checks have been made; the setting is on. Otherwise the reply stands.
+a `TaskStepKind` of `.opens` (open_app, open_url) or `.acts` (ui_click, ui_type, ui_press_keys, run_applescript, run_shortcut);
+tools that only `.looks` (ui_inspect, screenshot) or do the whole job ("add an event", wait) don't count. And not if the model
+has itself looked at the result of its last action (`verifiedByLooking`: an action followed by a successful look, the checker
+being unable to see the screen either; opening then looking is not enough, the model may have stopped at that page); or was sent
+back and answered again with no new step since the last check (it has made its case); the reply doesn't ask the user something;
+the user hasn't declined anything; a step and enough time (check timeout + 15 s) remain; fewer than two checks have been made;
+the setting is on. Otherwise the reply stands. (First live use: the video was already playing, the check said "not yet" twice
+because the click was named "a spot with nothing Voxa can identify", and the model did an extra screenshot before answering. The
+looked-at rule, the no-progress rule and the worked examples in the checker's instructions came from that.)
 
 **What it may see.** Only what Voxa knows: the spoken command, the titles of the tool calls that ran (with done/failed) and the
 reply, the last two as data inside the untrusted envelope. Never what a tool returned, so page or file text has no path into it.

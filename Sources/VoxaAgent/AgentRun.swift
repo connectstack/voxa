@@ -25,17 +25,19 @@ final class Run: @unchecked Sendable {
     var declines = 0
     var declined: Set<String> = []
 
-    /// One tool call that ran: what it was called, whether it worked, and whether it may have been only a step. The check reads
-    /// this, not what the tools returned.
+    /// One tool call that ran: what it was called, whether it worked, and what kind of step it was. The check reads this, not
+    /// what the tools returned.
     struct Step {
         var title: String
         var succeeded: Bool
-        var mayLeaveTaskUnfinished: Bool
+        var kind: TaskStepKind
     }
 
     var trace: [Step] = []
     /// How many times the completion check has been asked for this command (whatever it answered).
     var checks = 0
+    /// How many steps there were when the check was last made, so that the model isn't asked to answer the same check twice.
+    var stepsAtLastCheck = 0
 
     init(
         id: UUID,

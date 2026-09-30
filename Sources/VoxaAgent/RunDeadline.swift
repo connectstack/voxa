@@ -38,6 +38,11 @@ actor RunDeadline {
         return now - pausedTotal - currentPause
     }
 
+    /// How long the command has been running, waiting for the user included: the time on the clock, for the audit trail.
+    func sinceStart() -> Duration {
+        elapsed()
+    }
+
     /// How much of the budget is left.
     func remaining() -> Duration {
         max(limit - used(), .zero)

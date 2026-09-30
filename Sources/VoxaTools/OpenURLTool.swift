@@ -32,8 +32,7 @@ public struct OpenURLTool: TypedTool {
     )
     public let baselineRisk = RiskLevel.reversible
     public let requiredPermissions: Set<PermissionKind> = []
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
+    public let stepKind = TaskStepKind.opens
 
     private let catalog: any AppCataloging
     private let opener: any AppOpening

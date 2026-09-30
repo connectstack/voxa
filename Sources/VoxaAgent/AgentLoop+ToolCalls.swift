@@ -268,7 +268,7 @@ extension AgentLoop {
             Run.Step(
                 title: assessment.title,
                 succeeded: !result.isError,
-                mayLeaveTaskUnfinished: registry.tool(named: call.name)?.mayLeaveTaskUnfinished ?? false
+                kind: registry.tool(named: call.name)?.stepKind ?? .other
             )
         )
         run.emit(.finishedTool(title: assessment.title, succeeded: !result.isError, notice: result.notice))
@@ -330,9 +330,13 @@ extension AgentLoop {
         outcome: String? = nil,
         detail: String? = nil
     ) async {
+        // When it happened, not when the command began: the start plus the time on the command's clock, so that History shows
+        // how long each step took (and stays exact under a test's manual clock).
+        let elapsed = await run.deadline.sinceStart().components
+        let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         await audit.record(
             AuditEntry(
-                timestamp: run.context.now,
+                timestamp: run.context.now.addingTimeInterval(seconds),
                 runID: run.id,
                 kind: kind,
                 tool: tool,

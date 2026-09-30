@@ -99,8 +99,7 @@ public struct UIInspectTool: TypedTool {
     ])
     public let baselineRisk = RiskLevel.readOnly
     public let requiredPermissions: Set<PermissionKind> = [.accessibility]
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
+    public let stepKind = TaskStepKind.looks
 
     private let ui: any UIAutomating
 
@@ -172,8 +171,7 @@ public struct UIClickTool: TypedTool {
     ])
     public let baselineRisk = RiskLevel.reversible
     public let requiredPermissions: Set<PermissionKind> = [.accessibility]
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
+    public let stepKind = TaskStepKind.acts
 
     private let ui: any UIAutomating
 
@@ -278,8 +276,7 @@ public struct UITypeTool: TypedTool {
     )
     public let baselineRisk = RiskLevel.reversible
     public let requiredPermissions: Set<PermissionKind> = [.accessibility]
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
+    public let stepKind = TaskStepKind.acts
 
     private let ui: any UIAutomating
 
@@ -379,8 +376,7 @@ public struct UIPressKeysTool: TypedTool {
     )
     public let baselineRisk = RiskLevel.reversible
     public let requiredPermissions: Set<PermissionKind> = [.accessibility]
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
+    public let stepKind = TaskStepKind.acts
 
     private let ui: any UIAutomating
 

@@ -131,6 +131,10 @@ answer allow
 check "once allowed it finishes the job in the same command, and the second check says so" \
     "$(audit_has "$MARK" toolResult ui_click ok && audit_has "$MARK" completionCheck "" done && reply_has "Playing" && echo 0 || echo 1)"
 
+ask "ui looked"
+check "a model that looked at the result of what it did is not second-guessed: no check, and its reply stands" \
+    "$(! audit_has "$MARK" completionCheck && audit_has "$MARK" toolResult screenshot ok && reply_has "Done" && echo 0 || echo 1)"
+
 ask "find invoices"
 check "searching for files just runs, and finds them" "$(audit_has "$MARK" policyDecision file_search allow && reply_has "april-invoice" && echo 0 || echo 1)"
 ask "reveal report"
@@ -211,7 +215,7 @@ launch --env VOXA_DEBUG_SAMPLE_DATA=1 --env "VOXA_DEBUG_TOOL_PERMISSIONS=$ALL"
 
 ask "ui lazy"
 check "with the check off, the model's early reply stands and nothing is checked" \
-    "$(! audit_has "$MARK" completionCheck && reply_has "Waited" && echo 0 || echo 1)"
+    "$(! audit_has "$MARK" completionCheck && reply_has "Pressed" && echo 0 || echo 1)"
 settings ""
 
 # ---------------------------------------------------------------------------------------------------------------------------

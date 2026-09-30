@@ -28,8 +28,6 @@ public struct WaitTool: TypedTool {
     ])
     public let baselineRisk = RiskLevel.readOnly
     public let requiredPermissions: Set<PermissionKind> = []
-    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
-    public let mayLeaveTaskUnfinished = true
 
     private let sleep: @Sendable (Duration) async throws -> Void
 

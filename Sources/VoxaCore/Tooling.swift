@@ -179,6 +179,19 @@ public struct ToolInputError: Error, Sendable, Equatable {
     }
 }
 
+/// What a tool call amounts to in a longer job. Opening a page is not playing what is on it, and one click is not the whole of
+/// "fill in the form", so a command that used these may be unfinished when the model wants to reply.
+public enum TaskStepKind: Sendable, Equatable {
+    /// Does the whole of what it says (add an event, copy text, move a file), or only passes time (wait).
+    case other
+    /// Opens something (a page, an app): the start of "play it" or "fill it in", never its end.
+    case opens
+    /// Does something in what was opened: a click, keys, typing, a script.
+    case acts
+    /// Only looks (a listing of the window, a picture): changes nothing, but shows how things stand.
+    case looks
+}
+
 /// A capability the agent can use. Conformers are small and stateless; anything that touches the system goes through an
 /// injected protocol so the tool logic is testable without the system.
 public protocol AgentTool: Sendable {
@@ -189,10 +202,9 @@ public protocol AgentTool: Sendable {
     /// The lowest risk this tool can ever have. `assess` may only raise it.
     var baselineRisk: RiskLevel { get }
     var requiredPermissions: Set<PermissionKind> { get }
-    /// Whether what this tool does may be only a step towards what the user asked, which a further step has to finish: opening
-    /// a page is not playing it, and a click is not the whole of "fill in the form". The loop checks that a command is really
-    /// finished before accepting its reply when one of these has run.
-    var mayLeaveTaskUnfinished: Bool { get }
+    /// What a call of this tool amounts to in a longer job (`TaskStepKind`). The loop uses it to decide whether a command needs
+    /// a check that it is really finished before its reply is accepted.
+    var stepKind: TaskStepKind { get }
 
     /// Validates `input` and describes what the call would do. Throws `ToolInputError` for arguments that don't match.
     func assess(_ input: JSONValue) throws -> ToolAssessment
@@ -200,8 +212,8 @@ public protocol AgentTool: Sendable {
 }
 
 extension AgentTool {
-    /// Most tools do the whole of what they say (add an event, copy text, move a file).
-    public var mayLeaveTaskUnfinished: Bool { false }
+    /// Most tools do the whole of what they say (add an event, copy text, move a file), or only pass time.
+    public var stepKind: TaskStepKind { .other }
 
     public var definition: ToolDefinition {
         ToolDefinition(name: name, description: summary, inputSchema: inputSchema)
