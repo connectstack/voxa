@@ -5,10 +5,13 @@ import VoxaCore
 public struct PolicyConfiguration: Sendable, Equatable {
     public var strictness: ConfirmationStrictness
     public var disabledTools: Set<String>
+    /// The user has given Voxa full control: a call that would ask runs instead, except the few that never stop asking.
+    public var fullControl: Bool
 
-    public init(strictness: ConfirmationStrictness = .standard, disabledTools: Set<String> = []) {
+    public init(strictness: ConfirmationStrictness = .standard, disabledTools: Set<String> = [], fullControl: Bool = false) {
         self.strictness = strictness
         self.disabledTools = disabledTools
+        self.fullControl = fullControl
     }
 }
 
@@ -38,6 +41,9 @@ public enum PolicyDecision: Sendable, Equatable {
     case allowWithNotice(String)
     /// Ask first. The prompt is built from the tool's own description of the call.
     case requireConfirmation(ConfirmationPrompt)
+    /// The user has given Voxa full control, so a call that would have asked runs straight away. `notice` is what the panel
+    /// shows while it runs; `wouldAsk` is what the question would have said, kept for the audit trail.
+    case allowByFullControl(notice: String, wouldAsk: [String])
     /// Never run. The reason is shown to the user and returned to the model.
     case deny(reason: String)
 }
@@ -68,6 +74,9 @@ public enum PolicyFloors {
 /// 4. `reversible` asks if outside content has been read (taint) or the user chose strict confirmation.
 /// 5. `readOnly` asks only under paranoid confirmation.
 /// 6. The confirmation shows what the *tool's code* says the call will do, never model-written text.
+/// 7. If the user has given Voxa full control, a call that would ask runs instead, and what it would have asked is kept for the
+///    audit trail. That is the only thing that lowers 3 and 4, it is read from the user's settings and never from the model, and
+///    it changes nothing about 1: refusals stay refusals (a password field, a hidden file, a script's way to a shell).
 public struct PolicyEngine: Sendable {
     public var configuration: PolicyConfiguration
 
@@ -123,18 +132,19 @@ public struct PolicyEngine: Sendable {
         guard mustConfirm else {
             return risk == .readOnly ? .allow : .allowWithNotice(assessment.title)
         }
-        return .requireConfirmation(
-            ConfirmationPrompt(
-                toolName: toolName,
-                title: TextSanitizer.forDisplay(assessment.title),
-                summary: TextSanitizer.forDisplay(assessment.summary),
-                details: assessment.details.map {
-                    DetailRow(TextSanitizer.forDisplay($0.label), TextSanitizer.forDisplay($0.value), style: $0.style)
-                },
-                targetApp: assessment.targetApp.map(TextSanitizer.forDisplay),
-                risk: risk,
-                reasons: reasons.map(TextSanitizer.forDisplay)
-            )
+
+        let prompt = ConfirmationPrompt(
+            toolName: toolName,
+            title: TextSanitizer.forDisplay(assessment.title),
+            summary: TextSanitizer.forDisplay(assessment.summary),
+            details: assessment.details.map {
+                DetailRow(TextSanitizer.forDisplay($0.label), TextSanitizer.forDisplay($0.value), style: $0.style)
+            },
+            targetApp: assessment.targetApp.map(TextSanitizer.forDisplay),
+            risk: risk,
+            reasons: reasons.map(TextSanitizer.forDisplay)
         )
+        guard configuration.fullControl else { return .requireConfirmation(prompt) }
+        return .allowByFullControl(notice: assessment.title, wouldAsk: prompt.reasons)
     }
 }

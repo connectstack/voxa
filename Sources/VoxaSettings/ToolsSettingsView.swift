@@ -14,6 +14,13 @@ struct ToolsSettingsView: View {
             Section {
                 Text(L10n.ToolsUI.intro).font(.callout).foregroundStyle(.secondary)
             }
+            if store.current.fullControl {
+                Section {
+                    Label(L10n.FullControl.toolsBanner, systemImage: "exclamationmark.shield.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+            }
             ForEach(groups, id: \.category) { group in
                 Section(group.category.title) {
                     ForEach(group.tools) { tool in

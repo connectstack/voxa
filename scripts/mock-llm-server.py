@@ -55,6 +55,9 @@ Commands are answered by keyword:
     "shot window"       screenshot of the front window
     "shot screen"       screenshot of the whole screen (needs confirmation)
     "shot click"        screenshot, then ui_click on the Reload button at its place in the picture
+    "ui play"           wait for the page, screenshot, then ui_click in the picture, all in one command (a model that finishes the job)
+    "ui lazy"           a model that stops early: waits, says "Waited." and stops. Voxa's completion check (answered by this mock)
+                        sends it back, and then it takes a screenshot, clicks, and says "Playing it."
     "find invoices"     file_search for PDF invoices
     "trash screenshots" file_search for screenshots on the Desktop, then file_trash on what it found (needs confirmation)
     "move report"       file_move ~/Downloads/report.pdf into ~/Documents/Invoices (needs confirmation)
@@ -259,6 +262,27 @@ def windows_and_files_scenario(c, command, turn, results, joined, declined, bloc
             # The sample window is 1000 by 700 and the picture is the same size, so the Reload button is at (825, 22) in it.
             return [tool("ui_click", {"screenshot": "s1", "x": 825, "y": 22})], "tool_use"
         return [text("Okay, I didn't." if declined else ("Clicked." if "Clicked" in joined else "That didn't work: " + joined[:100]))], "end_turn"
+    if "ui play" in c:
+        # What "play X on YouTube" should look like: not stopping at the page that was opened, but letting it load, looking at it,
+        # clicking the video, and only then saying it is playing.
+        if turn == 0:
+            return [tool("wait", {"seconds": 1})], "tool_use"
+        if turn == 1:
+            return [tool("screenshot", {})], "tool_use"
+        if turn == 2:
+            return [tool("ui_click", {"screenshot": "s1", "x": 825, "y": 22})], "tool_use"
+        return [text("Okay, I didn't." if declined else ("Playing it." if "Clicked" in joined else "That didn't work: " + joined[:100]))], "end_turn"
+    if "ui lazy" in c:
+        # A model that stops at its first step. Voxa's check finds the job unfinished and sends it back with a note.
+        if turn == 0:
+            return [tool("wait", {"seconds": 1})], "tool_use"
+        if turn == 1:
+            return [text("Waited.")], "end_turn"
+        if turn == 2:
+            return [tool("screenshot", {})], "tool_use"
+        if turn == 3:
+            return [tool("ui_click", {"screenshot": "s1", "x": 825, "y": 22})], "tool_use"
+        return [text("Playing it.")], "end_turn"
     if "shot window" in c or "shot screen" in c:
         if turn == 0:
             return [tool("screenshot", {"scope": "screen"} if "screen" in c else {})], "tool_use"
@@ -353,6 +377,32 @@ def scenario(command, turn, results):
     return [text("I heard: " + command)], "end_turn"
 
 
+# MARK: Voxa's completion check
+
+CHECK_NOTE = "Check:"
+
+
+def checker_verdict(system_text, question):
+    """When the request is Voxa's completion check (a short question with no tools), the JSON it should get back; else None.
+
+    The mock plays a checker that judges "ui lazy" by whether the tools have clicked yet, and finds everything else finished."""
+    if "strict checker" not in (system_text or ""):
+        return None
+    spoken = re.search(r"The command the user spoke:\n(.*?)\n\n", question, re.S)
+    command = (spoken.group(1) if spoken else "").lower()
+    if "ui lazy" in command and "click" not in question.split("What Voxa's tools did")[-1].split("What the assistant is about")[0].lower():
+        return json.dumps({"done": False, "missing": "click in the page to finish what was asked", "confidence": 0.9})
+    return json.dumps({"done": True, "missing": "", "confidence": 0.95})
+
+
+def answer(system_text, command, turn, results):
+    """The next content blocks: the checker's verdict for a completion-check request, else the scenario's."""
+    verdict = checker_verdict(system_text, command)
+    if verdict is not None:
+        return [text(verdict)], "end_turn"
+    return scenario(command, turn, results)
+
+
 # MARK: Anthropic
 
 def anthropic_validate(headers, body):
@@ -408,14 +458,14 @@ def anthropic_validate(headers, body):
 
 def anthropic_conversation(messages):
     """The user's latest spoken command, the assistant turns taken for it so far, and the newest tool results."""
-    start = 0
-    for index, message in enumerate(messages):
-        if message["role"] == "user":
-            content = message["content"]
-            if isinstance(content, str) or any(b.get("type") == "text" for b in content):
-                start = index
-    first = messages[start]["content"]
-    raw = first if isinstance(first, str) else next(b["text"] for b in first if b.get("type") == "text")
+    def text_of(message):
+        content = message["content"]
+        return content if isinstance(content, str) else "".join(b.get("text", "") for b in content if b.get("type") == "text")
+
+    with_text = [i for i, m in enumerate(messages) if m["role"] == "user" and text_of(m).strip()]
+    commands = [i for i in with_text if "</context>" in text_of(messages[i])]
+    start = commands[-1] if commands else (with_text[-1] if with_text else 0)
+    raw = text_of(messages[start])
     CONTEXT.value = raw.split("</context>")[0]
     command = raw.split("</context>")[-1].strip()
     turn = sum(1 for m in messages[start + 1:] if m["role"] == "assistant")
@@ -428,6 +478,8 @@ def anthropic_conversation(messages):
                 if isinstance(inner, list):
                     inner = "\n".join(p.get("text", "") for p in inner if p.get("type") == "text")
                 results.append(inner)
+    if last["role"] == "user" and start < len(messages) - 1 and text_of(last).startswith(CHECK_NOTE):
+        results.append(text_of(last))
     return command, turn, results
 
 
@@ -541,12 +593,17 @@ def openai_validate(headers, body):
 
 def openai_conversation(items):
     """The latest spoken command, the assistant turns taken for it so far, and the newest tool results."""
-    def is_command(item):
+    def text_of(item):
+        content = item.get("content", "")
+        return content if isinstance(content, str) else "".join(p.get("text", "") for p in content)
+
+    def is_message(item):
         return item.get("role") == "user" and item.get("type") in (None, "message")
 
-    start = max(i for i, item in enumerate(items) if is_command(item))
-    content = items[start]["content"]
-    raw = content if isinstance(content, str) else "".join(p.get("text", "") for p in content)
+    messages = [i for i, item in enumerate(items) if is_message(item)]
+    commands = [i for i in messages if "</context>" in text_of(items[i])]
+    start = commands[-1] if commands else messages[-1]
+    raw = text_of(items[start])
     CONTEXT.value = raw.split("</context>")[0]
     command = raw.split("</context>")[-1].strip()
 
@@ -565,6 +622,8 @@ def openai_conversation(items):
         if isinstance(output, list):
             output = "\n".join(p.get("text", "") for p in output if p.get("type") == "input_text")
         results.insert(0, output)
+    if items and is_message(items[-1]) and len(items) - 1 > start and text_of(items[-1]).startswith(CHECK_NOTE):
+        results.append(text_of(items[-1]))
     return command, turn, results
 
 
@@ -631,10 +690,12 @@ def ollama_validate(body):
 
 def ollama_conversation(messages):
     """The latest spoken command, the assistant turns taken for it so far, and the newest tool results."""
-    def is_command(m):
+    def is_message(m):
         return m.get("role") == "user" and not m.get("images")
 
-    start = max(i for i, m in enumerate(messages) if is_command(m))
+    said = [i for i, m in enumerate(messages) if is_message(m)]
+    commands = [i for i in said if "</context>" in messages[i]["content"]]
+    start = commands[-1] if commands else said[-1]
     CONTEXT.value = messages[start]["content"].split("</context>")[0]
     command = messages[start]["content"].split("</context>")[-1].strip()
     turn = sum(1 for m in messages[start + 1:] if m.get("role") == "assistant")
@@ -643,6 +704,9 @@ def ollama_conversation(messages):
         if message.get("role") != "tool":
             break
         results.insert(0, message.get("content", ""))
+    last = messages[-1]
+    if is_message(last) and len(messages) - 1 > start and last["content"].startswith(CHECK_NOTE):
+        results.append(last["content"])
     return command, turn, results
 
 
@@ -789,7 +853,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             error(529, "overloaded_error", "Overloaded")
             return
 
-        blocks, stop = scenario(command, turn, results)
+        blocks, stop = answer((body.get("system") or [{}])[0].get("text", ""), command, turn, results)
         self.start_stream("text/event-stream")
         try:
             self.anthropic_stream(blocks, stop, slow="slow" in c, cut_off="cutoff" in c and attempt == 1, model=body["model"])
@@ -868,7 +932,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(*openai_error(503, None, "The server is overloaded or not ready yet.", "server_error"))
             return
 
-        blocks, stop = scenario(command, turn, results)
+        blocks, stop = answer(body.get("instructions") or "", command, turn, results)
         self.start_stream("text/event-stream")
         try:
             self.openai_stream(blocks, stop, slow="slow" in c, cut_off="cutoff" in c and attempt == 1, model=body["model"])
@@ -968,7 +1032,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(503, {"error": "server busy, please try again. maximum pending requests exceeded"})
             return
 
-        blocks, stop = scenario(command, turn, results)
+        system_text = next((m.get("content", "") for m in body.get("messages", []) if m.get("role") == "system"), "")
+        blocks, stop = answer(system_text, command, turn, results)
         self.start_stream("application/x-ndjson")
         try:
             self.ollama_stream(blocks, stop, body, slow="slow" in c, cut_off="cutoff" in c and attempt == 1)

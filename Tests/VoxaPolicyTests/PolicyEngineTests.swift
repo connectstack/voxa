@@ -34,6 +34,7 @@ private extension PolicyDecision {
         switch self {
         case .allow: "allow"
         case .allowWithNotice: "notice"
+        case .allowByFullControl: "auto"
         case .requireConfirmation: "confirm"
         case .deny: "deny"
         }
@@ -52,10 +53,13 @@ struct PolicyEngineTests {
         baseline: RiskLevel = .readOnly,
         taint: RunTaint = RunTaint(),
         strictness: ConfirmationStrictness = .standard,
-        disabled: Set<String> = []
+        disabled: Set<String> = [],
+        fullControl: Bool = false
     ) -> PolicyDecision {
-        PolicyEngine(configuration: PolicyConfiguration(strictness: strictness, disabledTools: disabled))
-            .evaluate(toolName: tool, baselineRisk: baseline, assessment: assessed, taint: taint)
+        PolicyEngine(
+            configuration: PolicyConfiguration(strictness: strictness, disabledTools: disabled, fullControl: fullControl)
+        )
+        .evaluate(toolName: tool, baselineRisk: baseline, assessment: assessed, taint: taint)
     }
 
     // MARK: The three tiers
@@ -259,6 +263,147 @@ struct PolicyEngineTests {
             decide(assessment(.readOnly), tool: "open_url", disabled: ["open_app"]).kind == "allow",
             "only the named tool is off"
         )
+    }
+}
+
+// MARK: - Full control
+
+/// The user's own switch for "don't ask me". These pin what it changes, and, as much, what it cannot.
+@Suite("PolicyEngine: full control")
+struct PolicyEngineFullControlTests {
+    private func decide(
+        _ assessed: ToolAssessment,
+        tool: String = "some_tool",
+        baseline: RiskLevel = .readOnly,
+        taint: RunTaint = RunTaint(),
+        strictness: ConfirmationStrictness = .standard,
+        disabled: Set<String> = [],
+        fullControl: Bool = true
+    ) -> PolicyDecision {
+        PolicyEngine(
+            configuration: PolicyConfiguration(strictness: strictness, disabledTools: disabled, fullControl: fullControl)
+        )
+        .evaluate(toolName: tool, baselineRisk: baseline, assessment: assessed, taint: taint)
+    }
+
+    @Test("it is off unless something turns it on")
+    func offByDefault() {
+        #expect(PolicyConfiguration().fullControl == false)
+        #expect(PolicyConfiguration(strictness: .paranoid, disabledTools: ["x"]).fullControl == false)
+        #expect(AppSettings().fullControl == false)
+        #expect(decide(assessment(.sensitive), fullControl: false).kind == "confirm")
+    }
+
+    @Test("a sensitive call runs without asking, and the panel is told what it is")
+    func sensitiveRuns() {
+        #expect(decide(assessment(.sensitive, title: "Move 3 files")).kind == "auto")
+        guard case .allowByFullControl(let notice, _) = decide(assessment(.sensitive, title: "Move 3 files")) else {
+            Issue.record("expected the call to run")
+            return
+        }
+        #expect(notice == "Move 3 files")
+    }
+
+    @Test("what it would have asked is kept, word for word, for the audit trail")
+    func remembersTheQuestion() throws {
+        let call = assessment(.sensitive, reasons: ["Deletes something"])
+        let contamination = taint("web page")
+        let asked = try #require(decide(call, taint: contamination, fullControl: false).prompt)
+        guard case .allowByFullControl(_, let wouldAsk) = decide(call, taint: contamination) else {
+            Issue.record("expected the call to run")
+            return
+        }
+        #expect(wouldAsk == asked.reasons)
+        #expect(wouldAsk == ["Deletes something", L10n.Policy.taint(["web page"])])
+    }
+
+    @Test("outside content, strict and paranoid no longer ask either, since they only ever raised the bar")
+    func everyReasonToAsk() {
+        #expect(decide(assessment(.reversible), taint: taint("clipboard")).kind == "auto")
+        #expect(decide(assessment(.reversible), strictness: .strict).kind == "auto")
+        #expect(decide(assessment(.readOnly), strictness: .paranoid).kind == "auto")
+        #expect(decide(assessment(.sensitive), taint: taint("file contents"), strictness: .paranoid).kind == "auto")
+    }
+
+    @Test("calls that never asked are left exactly as they were: reads stay silent, changes keep their notice")
+    func quietCallsUnchanged() {
+        #expect(decide(assessment(.readOnly)).kind == "allow")
+        #expect(decide(assessment(.reversible, title: "Opening Safari")) == .allowWithNotice("Opening Safari"))
+    }
+
+    @Test("it only ever removes a question: for every combination the answer is the same or 'auto' where it would have asked")
+    func matrix() {
+        let tools = [
+            "open_app", "file_trash", "run_shortcut", "run_applescript", "ui_click", "calendar_delete_event", "unknown",
+        ]
+        for tool in tools {
+            for baseline in RiskLevel.allCases {
+                for assessed in RiskLevel.allCases {
+                    for strictness in ConfirmationStrictness.allCases {
+                        for tainted in [false, true] {
+                            let contamination = tainted ? taint("clipboard") : RunTaint()
+                            func run(fullControl: Bool) -> PolicyDecision {
+                                decide(
+                                    assessment(assessed),
+                                    tool: tool,
+                                    baseline: baseline,
+                                    taint: contamination,
+                                    strictness: strictness,
+                                    fullControl: fullControl
+                                )
+                            }
+                            let without = run(fullControl: false)
+                            let with = run(fullControl: true)
+                            let label = "\(tool) \(baseline) \(assessed) \(strictness) tainted=\(tainted)"
+                            #expect(with.kind != "confirm", "full control must not ask: \(label)")
+                            #expect(with.kind == (without.kind == "confirm" ? "auto" : without.kind), "\(label)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: What it cannot do
+
+    @Test("a refusal is still a refusal: disabled tools and blocked calls never run")
+    func refusalsStand() {
+        #expect(
+            decide(assessment(.readOnly), tool: "open_app", disabled: ["open_app"])
+                == .deny(reason: L10n.Policy.toolDisabled("open_app"))
+        )
+        #expect(decide(assessment(.sensitive, block: "No shell here.")) == .deny(reason: "No shell here."))
+        #expect(decide(assessment(.readOnly, block: "Nope")).kind == "deny")
+    }
+
+    // MARK: What it does cover
+
+    @Test("scripts run too, however the tool describes itself, and without full control they still ask")
+    func scriptsRun() {
+        for risk in RiskLevel.allCases {
+            #expect(decide(assessment(risk), tool: "run_applescript", baseline: risk).kind == "auto", "\(risk)")
+            #expect(decide(assessment(risk), tool: "run_applescript", baseline: risk, fullControl: false).kind == "confirm", "\(risk)")
+        }
+        #expect(decide(assessment(.sensitive), tool: "run_shortcut").kind == "auto")
+    }
+
+    @Test("so do actions in apps that change the Mac itself, and what they would have asked is kept")
+    func systemAppCallsRun() throws {
+        let reason = "System Settings: It changes settings of the Mac."
+        let call = assessment(.sensitive, reasons: [reason])
+        guard case .allowByFullControl(_, let wouldAsk) = decide(call, tool: "ui_click") else {
+            Issue.record("expected the call to run")
+            return
+        }
+        #expect(wouldAsk == [reason])
+        #expect(try #require(decide(call, tool: "ui_click", fullControl: false).prompt).reasons == [reason])
+    }
+
+    @Test("a script that is refused stays refused: the refusal comes from the tool's assessment, which full control never touches")
+    func refusedScriptStaysRefused() {
+        let reason = "Scripts can't run shell commands. Voxa has no shell."
+        let refused = assessment(.sensitive, block: reason)
+        #expect(decide(refused, tool: "run_applescript", baseline: .sensitive) == .deny(reason: reason))
     }
 }
 

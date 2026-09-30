@@ -78,6 +78,42 @@ struct RunAppleScriptToolTests {
         }
     }
 
+    @Test("with full control a script runs without a question, and the routes to a shell, Terminal and Voxa itself are still refused")
+    func withFullControl() throws {
+        let scriptTool = tool()
+        let engine = PolicyEngine(configuration: PolicyConfiguration(fullControl: true))
+        func decide(_ script: String) throws -> PolicyDecision {
+            let assessment = try scriptTool.assess(["script": .string(script)])
+            return engine.evaluate(
+                toolName: scriptTool.name,
+                baselineRisk: scriptTool.baselineRisk,
+                assessment: assessment,
+                taint: RunTaint()
+            )
+        }
+        for script in [
+            #"tell application "Finder" to activate"#,
+            #"tell application "System Events" to keystroke "a" using command down"#,
+            "set volume output volume 30",
+            #"tell application "System Settings" to activate"#,
+        ] {
+            guard case .allowByFullControl(_, let wouldAsk) = try decide(script) else {
+                Issue.record("expected the script to run: \(script)")
+                continue
+            }
+            #expect(!wouldAsk.isEmpty, "what it would have asked is kept: \(script)")
+        }
+        for script in [
+            #"do shell script "ls""#,
+            #"tell application "Terminal" to do script "ls""#,
+            #"run script "return 1""#,
+            #"tell application "Voxa" to activate"#,
+            #"tell application "System Events" to tell process "Voxa" to click button 1 of window 1"#,
+        ] {
+            #expect(try decide(script).isDenial, "still refused: \(script)")
+        }
+    }
+
     @Test("a tool that misreports its own risk still asks, through the policy's floor")
     func floor() throws {
         let fine = try tool().assess(["script": "return 1"])

@@ -118,6 +118,19 @@ check "a click at a point in a picture asks" "$(audit_has "$MARK" policyDecision
 answer allow
 check "once allowed, the click lands on the button in the picture" "$(audit_has "$MARK" toolResult ui_click ok && reply_has "Clicked" && echo 0 || echo 1)"
 
+ask "ui play"
+check "the whole chain is one command: a wait just runs, the picture is taken with a notice, and the click asks (a picture is outside content)" \
+    "$(audit_has "$MARK" policyDecision wait allow && audit_has "$MARK" toolResult wait ok && audit_has "$MARK" policyDecision screenshot notice && audit_has "$MARK" policyDecision ui_click confirm && echo 0 || echo 1)"
+answer allow
+check "once allowed, it clicks and says it is playing, without a second command" "$(audit_has "$MARK" toolResult ui_click ok && reply_has "Playing" && echo 0 || echo 1)"
+
+ask "ui lazy"
+check "a model that stops after its first step is checked, found unfinished, and sent back to work" \
+    "$(audit_has "$MARK" completionCheck "" notDone && audit_has "$MARK" policyDecision screenshot notice && echo 0 || echo 1)"
+answer allow
+check "once allowed it finishes the job in the same command, and the second check says so" \
+    "$(audit_has "$MARK" toolResult ui_click ok && audit_has "$MARK" completionCheck "" done && reply_has "Playing" && echo 0 || echo 1)"
+
 ask "find invoices"
 check "searching for files just runs, and finds them" "$(audit_has "$MARK" policyDecision file_search allow && reply_has "april-invoice" && echo 0 || echo 1)"
 ask "reveal report"
@@ -135,6 +148,71 @@ check "a file in a hidden folder can never be trashed, and the user is not even 
     "$(audit_has "$MARK" policyDecision file_trash deny && ! audit_has "$MARK" confirmation && reply_has "can't touch" && echo 0 || echo 1)"
 
 check "every request the app made was a valid one" "$(requests_valid anthropic && echo 0 || echo 1)"
+
+# ---------------------------------------------------------------------------------------------------------------------------
+log "Full control: what stops asking, and what never does"
+settings ',"fullControl":true'
+launch --env VOXA_DEBUG_SAMPLE_DATA=1 --env "VOXA_DEBUG_TOOL_PERMISSIONS=$ALL"
+
+ask "ui quit"
+check "a shortcut that quits an app runs with no question, and the trail says it ran on the user's say-so" \
+    "$(audit_has "$MARK" policyDecision ui_press_keys auto && ! audit_has "$MARK" confirmation && audit_has "$MARK" toolResult ui_press_keys ok && echo 0 || echo 1)"
+
+ask "ui click feedback"
+check "a button labelled Send Feedback is pressed without asking" \
+    "$(audit_has "$MARK" policyDecision ui_click auto && ! audit_has "$MARK" confirmation && audit_has "$MARK" toolResult ui_click ok && echo 0 || echo 1)"
+
+ask "ui type search"
+check "typing after the window was read (outside content) no longer asks" \
+    "$(audit_has "$MARK" policyDecision ui_type auto && ! audit_has "$MARK" confirmation && reply_has "Typed" && echo 0 || echo 1)"
+
+ask "ui play"
+check "the same chain under full control is one command with no question at all" \
+    "$(audit_has "$MARK" toolResult wait ok && audit_has "$MARK" policyDecision ui_click auto && ! audit_has "$MARK" confirmation && audit_has "$MARK" toolResult ui_click ok && reply_has "Playing" && echo 0 || echo 1)"
+
+ask "ui lazy"
+check "the checked, sent-back command finishes in one go under full control, with no question at all" \
+    "$(audit_has "$MARK" completionCheck "" notDone && audit_has "$MARK" toolResult ui_click ok && ! audit_has "$MARK" confirmation && reply_has "Playing" && echo 0 || echo 1)"
+
+ask "move report"
+check "moving a file runs without asking" \
+    "$(audit_has "$MARK" policyDecision file_move auto && ! audit_has "$MARK" confirmation && audit_has "$MARK" toolResult file_move ok && reply_has "Moved" && echo 0 || echo 1)"
+
+ask "trash screenshots"
+check "trashing files runs without asking, after the search that found them" \
+    "$(audit_has "$MARK" policyDecision file_trash auto && ! audit_has "$MARK" confirmation && audit_has "$MARK" toolResult file_trash ok && echo 0 || echo 1)"
+
+ask "trash ssh"
+check "a file in a hidden folder is still refused outright" \
+    "$(audit_has "$MARK" policyDecision file_trash deny && ! audit_has "$MARK" toolResult file_trash ok && reply_has "can't touch" && echo 0 || echo 1)"
+
+ask "ui password"
+check "typing into a password field is still refused outright" \
+    "$(audit_has "$MARK" policyDecision ui_type deny && ! audit_has "$MARK" toolResult ui_type ok && reply_has "password field" && echo 0 || echo 1)"
+
+ask "shell"
+check "a script that runs a shell command is still refused, and nobody is asked" \
+    "$(audit_has "$MARK" policyDecision run_applescript deny && ! audit_has "$MARK" confirmation && reply_has "can't run shell" && echo 0 || echo 1)"
+
+ask "add numbers"
+check "a script runs without asking, and the trail says it ran on the user's say-so" \
+    "$(audit_has "$MARK" policyDecision run_applescript auto && ! audit_has "$MARK" confirmation && audit_has "$MARK" toolResult run_applescript ok && reply_has "42" && echo 0 || echo 1)"
+
+check "the status report says nothing is left waiting" "$(! report_has "awaiting=true" && echo 0 || echo 1)"
+check "every request the app made was a valid one" "$(requests_valid anthropic && echo 0 || echo 1)"
+
+# The sections after this one are about how Voxa behaves out of the box, so put the setting back before the next launch reads it.
+settings ""
+
+# ---------------------------------------------------------------------------------------------------------------------------
+log "The completion check can be turned off"
+settings ',"verifyCompletion":false'
+launch --env VOXA_DEBUG_SAMPLE_DATA=1 --env "VOXA_DEBUG_TOOL_PERMISSIONS=$ALL"
+
+ask "ui lazy"
+check "with the check off, the model's early reply stands and nothing is checked" \
+    "$(! audit_has "$MARK" completionCheck && reply_has "Waited" && echo 0 || echo 1)"
+settings ""
 
 # ---------------------------------------------------------------------------------------------------------------------------
 log "A web page and a file name with instructions hidden in them"

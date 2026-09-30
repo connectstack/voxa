@@ -27,6 +27,10 @@ struct MenuBarContent: View {
 
     var body: some View {
         Text(statusText)
+        if environment.settings.current.fullControl {
+            Label(L10n.FullControl.menuOn, systemImage: "exclamationmark.shield.fill")
+            Button(L10n.FullControl.menuTurnOff) { environment.settings.current.fullControl = false }
+        }
         Divider()
         #if DEBUG
         Menu("Debug: preview HUD") {

@@ -7,7 +7,8 @@ public enum RiskLevel: Int, Comparable, Codable, Sendable, CaseIterable {
     /// Changes state in a way the user can see and undo (opening an app or a page). Runs, and the HUD says what happened.
     case reversible = 1
     /// Sends, deletes, moves, buys, posts, or changes system settings, or runs code whose effect can't be predicted.
-    /// Always needs the user's explicit confirmation, whatever the model says.
+    /// Needs the user's explicit confirmation, whatever the model says. The one thing that lifts that is the user's own
+    /// choice to give Voxa full control (`AppSettings.fullControl`).
     case sensitive = 2
 
     public static func < (lhs: RiskLevel, rhs: RiskLevel) -> Bool {
@@ -15,7 +16,8 @@ public enum RiskLevel: Int, Comparable, Codable, Sendable, CaseIterable {
     }
 }
 
-/// How eagerly the app asks before acting. Sensitive actions always ask; this only raises the bar for the rest.
+/// How eagerly the app asks before acting. Sensitive actions always ask; this only raises the bar for the rest. (Full control,
+/// a separate switch, is the only thing that lowers it.)
 public enum ConfirmationStrictness: String, Codable, CaseIterable, Sendable, Identifiable {
     /// Ask for sensitive actions, and for anything that follows outside content entering the command.
     case standard
@@ -187,6 +189,10 @@ public protocol AgentTool: Sendable {
     /// The lowest risk this tool can ever have. `assess` may only raise it.
     var baselineRisk: RiskLevel { get }
     var requiredPermissions: Set<PermissionKind> { get }
+    /// Whether what this tool does may be only a step towards what the user asked, which a further step has to finish: opening
+    /// a page is not playing it, and a click is not the whole of "fill in the form". The loop checks that a command is really
+    /// finished before accepting its reply when one of these has run.
+    var mayLeaveTaskUnfinished: Bool { get }
 
     /// Validates `input` and describes what the call would do. Throws `ToolInputError` for arguments that don't match.
     func assess(_ input: JSONValue) throws -> ToolAssessment
@@ -194,6 +200,9 @@ public protocol AgentTool: Sendable {
 }
 
 extension AgentTool {
+    /// Most tools do the whole of what they say (add an event, copy text, move a file).
+    public var mayLeaveTaskUnfinished: Bool { false }
+
     public var definition: ToolDefinition {
         ToolDefinition(name: name, description: summary, inputSchema: inputSchema)
     }

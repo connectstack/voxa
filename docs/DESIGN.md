@@ -162,12 +162,28 @@ changes, or when it grows too long.
 
 - Effective risk is `max(tool baseline, tool.assess(input), PolicyFloors[tool])`. Nothing can *lower* a tier; the floors are
   the policy's own second opinion, so a tool that mislabels itself as harmless still asks.
-- `.sensitive` always requires explicit confirmation, whatever the model says or claims the user said.
+- `.sensitive` requires explicit confirmation, whatever the model says or claims the user said. The one thing that lifts that
+  is **full control** (below), which is the user's own switch.
 - **Taint.** Once untrusted data (script output, later clipboard, screen, files, web text) has been put in front of the
   model, `.reversible` tools also require confirmation, with the reason shown. The taint lasts as long as that content
   stays in the conversation (a whole follow-up session, not one command), because "act on this at the next command" is the
   obvious way past a per-command check. Reads stay allowed; an empty result doesn't taint.
 - `strict` asks before every state change, `paranoid` before everything.
+- **Full control** (`AppSettings.fullControl`, off by default, Settings → Safety). When on, a call that would have asked is
+  allowed instead, as `PolicyDecision.allowByFullControl(notice:wouldAsk:)`: the loop runs it, the HUD shows its title as for any
+  action, and the audit trail records `policyDecision … auto` with what the question would have said, which History shows as
+  "ran without asking (full control)". It changes *questions only*. It is applied after the refusals, so a disabled tool, a
+  call the tool blocks (a password field, a hidden path, a script that reaches for a shell) and an app on the untouchable list
+  are refused exactly as before. **Nothing else keeps asking**: scripts (`run_applescript`, `run_shortcut`) and the apps the
+  app list says change the Mac itself (System Settings, Disk Utility, Activity Monitor…) run like everything else. (An earlier
+  version kept those two asking; the user said that would leave it a manual agent, not an automation agent, so they were removed.)
+  The script analyzer's refusals still apply, and with full control on it is the only check on a script: a speed bump, not a
+  sandbox. The flag is copied into `AgentRunConfiguration`
+  at the start of a command, like the other settings, so a command never *gains* full control part-way; but `AgentLoop` also asks
+  `fullControlStillOn` before each call, so switching it *off* (the menu-bar item, Settings) takes effect from the next action
+  instead of letting the command run to the end under the old setting. It never comes from the model or from anything read. Voxa's own bundle identifier is on the untouchable list, and scripts can't name Voxa, so its own tools
+  can't click through its Settings to turn it on. The model is told (a line in the per-turn `<context>` block, not in the
+  static system prompt) that confirmations are off and to take extra care.
 - Only the tool and the app decide risk; the model cannot pass a "risk" or "confirmed" argument (the schema forbids it).
 - The confirmation shows what the *tool's code* says the call will do (title, exact arguments, target app, reasons), with
   invisible and text-direction characters made visible, so a model-written summary can never hide what will happen.
@@ -398,6 +414,40 @@ each client = StreamingEngine (retries, backoff, cancellation, .restarted) + a w
   everything around it is tested, and `voxa-dev transcribe clip.aiff --engine whisper --model base.en --download` is the one command
   that does it.
 
+### Checking that a command is finished (after M4)
+
+**The failure.** *"Play Hanuman Chalisa in YouTube"* opened the search page and replied "I opened YouTube search results"; only a
+second command ("Play") did the screenshot and click. The tools could do all of it, but a model treats the first step that
+looks like an answer as the answer. Guidance helps (the prompt now says to finish the job, that a results page plays nothing,
+and how to play something on YouTube; `open_url` says it only opens the page; a `wait` tool lets it load; `ui_inspect` says
+when a browser's page isn't listed), but guidance is a hope. The check is the harness not taking the model's word for it.
+
+**Shape.** A small typed decision at a decision point in the loop, rather than another free-form turn. (Two references from
+the user: TypeSafe AI's *Jev*, a small "System One" classification model that returns a typed answer with a probability and is
+used as middleware in agent loops, for routing and for checking tool calls; and *Laya-CoreML*, which runs such decision models
+on Apple Silicon through Core ML. Neither is a completion checker as such; the idea taken from them is the fast typed gate.)
+`CompletionVerifying.verdict(for:configuration:)` answers `CompletionVerdict(isDone, missing, confidence)` from
+`CompletionEvidence(command, actions, reply)`. `LLMCompletionVerifier` implements it with the user's own provider and model in a
+separate short request: no tools, low effort, one JSON object back. Because it is a protocol, a model that runs on this Mac
+could replace it without the loop changing.
+
+**When.** In `AgentLoop`, where the model's turn would end the command (`concludeOrContinue`): only if a tool ran that declares
+`mayLeaveTaskUnfinished` (open_app, open_url, wait, ui_*, screenshot, run_applescript, run_shortcut: steps, unlike
+"add an event", which is the whole job); the reply doesn't ask the user something; the user hasn't declined anything; a step and
+enough time (check timeout + 15 s) remain; fewer than two checks have been made; the setting is on. Otherwise the reply stands.
+
+**What it may see.** Only what Voxa knows: the spoken command, the titles of the tool calls that ran (with done/failed) and the
+reply, the last two as data inside the untrusted envelope. Never what a tool returned, so page or file text has no path into it.
+What it answers is cleaned before it reaches the model (`CompletionVerdict.clean`: one line, 160 characters, and anything that
+looks like an address is replaced by "everything the user asked for").
+
+**What it does.** If `!isDone` and `confidence >= 0.5`, the model's early reply and a note from Voxa go into the history (the
+note starts "Check:", is a user turn and never a tool result, asks for the user's own command to be finished and nothing else,
+and allows "say so if it is done or can't be done") and the loop takes another step. Any tool that follows goes through the
+same policy and confirmations as always. It never ends a command early, never adds anything the command didn't ask for, and every
+failure (no answer, unreadable answer, timeout, low confidence) leaves the reply as it was. Esc during a check ends the command.
+Each check is in the audit trail (`completionCheck`: done / notDone / unsure / unavailable) and History.
+
 ### Test hooks that don't reach other copies (M4)
 
 Debug builds react to Darwin notifications (`notifyutil -p com.rohitsainier.voxa.debug.…`), which are system-wide. A test run
@@ -436,6 +486,9 @@ runtime, filled in with the step cap, and kept **static**. Tests pin the safety 
 | A20 | WhisperKit lives in its own module; models are downloaded only on request; a model is usable only once a "ready" marker says it was prepared. | Keep a big dependency contained, never surprise anyone with a download, never mistake a half-finished download for a model. |
 | A21 | Screenshots and UI listings carry no text of Voxa's own beyond a reference and a role; tool results never repeat labels or file names. | Text from outside must reach the model only inside the untrusted envelope. |
 | A22 | End-to-end scripts use test hooks with a private suffix and stop only their own copy. | They must be safe to run while the user is using Voxa. |
+| A23 | Full control is one switch in Settings → Safety, off by default, asked about before it turns on, visible in the menu bar with a way to switch it off, and marked in History. It leaves refusals alone; nothing else asks, scripts and system-changing apps included. | The user asked not to be asked, and said a version that still asked for scripts and system apps would be "a manual agent, not an automation agent". Removing the questions is their call, made knowingly (the question before it turns on names scripts and changes to the Mac); removing the refusals (password fields, terminals, shell access, hidden paths, Voxa's own windows) is not what the switch is for. |
+| A24 | "Play X on YouTube" must be one command: `open_url` says it only opened the page (and that it may still be loading); a `wait` tool (read-only, 1–10 s) lets the page draw; the prompt says to finish the job, that a results page plays nothing, and gives the YouTube recipe (results URL with the video filter, wait, screenshot, click the first real video, check); a listing of a browser window with no links says the page isn't readable and to take a screenshot. | It stopped at "I opened YouTube search results" and needed a second command ("Play") that did the inspect, screenshot and click. Nothing was missing from the tools; the model had no reason to think opening wasn't the end, and no way to let the page load. It is guidance, so it depends on the model following it; the E2E mock scenario checks that the chain works, not that a given model chooses it. |
+| A25 | The reply is checked against the command before it is accepted, but only after tools that may be just a step, at most twice, with a typed verdict and a confidence, from the user's own model, and it fails open. | Models stop early ("opened the search results" is not "playing it"), and a harness that trusts them can't fix it. A check on every command would add a request to each; a check that could block or loop would be worse than the problem. The check is another model call, so it can be wrong either way; that is why it can only add work the user asked for, twice, and never hold a reply back. |
 
 ### Lesson: never let SwiftUI size a window through Auto Layout on macOS 26
 
@@ -509,6 +562,8 @@ real catalog. Any tool that reads the real system should have at least one test 
 | R14 | Real screen capture, real synthetic input and the real Accessibility tree can't be exercised without the user's grants. | Logic tested against a pretend desktop; the real capture was run once on a window of the test's own (colours and coordinates checked); the rest is on the manual QA list. |
 | R15 | Moving files can lose work if the path is wrong or the disk changes under the card. | Canonical paths and plain rules; never replaces or deletes; the plan is made again when the action runs; results say how far it got. |
 | R16 | WhisperKit adds a large dependency, needs a model that has to be downloaded, and its accuracy on short commands varies with the model. | Contained in one module; downloads only on request with sizes shown; Apple's engines remain the default; silence is never sent to it. A real transcription hasn't been run (it needs the download). |
+| R17 | With full control on, a fooled model acts without anyone seeing it first: a web page, email or file that carries an instruction can have it followed, including running an AppleScript or a Shortcut, changing the Mac's settings, or sending what was read to a link. | The user chooses it, is told so when turning it on, and can see it is on (menu bar, Tools tab, History, which keeps what was asked of each tool). Refusals stay (the analyzer's routes to a shell, password fields, terminals, hidden paths, Voxa's own windows); the model is told to take care; Esc stops a command. Residual: everything that would have asked, and a script written to slip past the analyzer, which is a speed bump and nothing more. |
+| R18 | The completion check is a model call, so it can be wrong: a false "not finished" makes the model do extra, a false "finished" lets an incomplete reply through, and the reply it judges could try to steer it. | It only ever adds steps for the user's own command, twice at most, and those steps go through the usual policy. It sees no tool output, wraps the reply and step names as data, and its "what is left" is cleaned (no addresses) before it becomes a note. A confidence under 0.5 does nothing. Residual: a check fooled into "finished" changes nothing; one fooled into "not finished" costs up to two extra rounds. |
 
 ## 7. Milestones
 

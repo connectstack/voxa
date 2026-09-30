@@ -39,7 +39,7 @@ let usage = """
           Prints the agent system prompt exactly as it is sent.
 
       voxa-dev ask "<command>" [--provider anthropic|openai|ollama] [--base-url URL] [--key KEY] [--model ID]
-                               [--context TOKENS] [--confirm ask|yes|no[,…]] [--dry-run] [--sample-data]
+                               [--context TOKENS] [--confirm ask|yes|no[,…]] [--dry-run] [--sample-data] [--full-control]
           Runs a typed command through the real agent loop, model client, policy and tools, with no microphone or HUD.
           The key comes from --key, or $ANTHROPIC_API_KEY (claude) / $OPENAI_API_KEY (openai); Ollama needs none. With a
           loopback --base-url (see scripts/mock-llm-server.py) no key is needed either. Ollama needs --model (an installed
@@ -48,6 +48,8 @@ let usage = """
           --dry-run prints what open_app and open_url would open instead of opening it. AppleScript and Shortcuts still run.
           --sample-data runs the calendar, reminders, clipboard and front-app tools against made-up data, so nobody's real
           calendar or clipboard is touched. (Without it they use the real ones, with whatever access this terminal has.)
+          --full-control does what the Safety switch in Settings does: everything that would ask runs without asking, scripts
+          and apps that change the Mac included. Refusals stay refusals.
 
       voxa-dev tools
           Prints every tool's name, description and input schema exactly as they are offered to the model.

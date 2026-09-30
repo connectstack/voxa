@@ -12,17 +12,21 @@ public struct AgentLimits: Sendable, Equatable {
     public var maxDeclines: Int
     /// A tool result longer than this is cut, so one runaway result can't fill the model's context.
     public var maxToolResultCharacters: Int
+    /// How long the check that a command is finished may take. Past this the model's reply is accepted as it stands.
+    public var checkTimeout: Duration
 
     public init(
         perToolTimeout: Duration = .seconds(30),
         totalTimeout: Duration = .seconds(120),
         maxDeclines: Int = 2,
-        maxToolResultCharacters: Int = 20_000
+        maxToolResultCharacters: Int = 20_000,
+        checkTimeout: Duration = .seconds(15)
     ) {
         self.perToolTimeout = perToolTimeout
         self.totalTimeout = totalTimeout
         self.maxDeclines = maxDeclines
         self.maxToolResultCharacters = maxToolResultCharacters
+        self.checkTimeout = checkTimeout
     }
 }
 
@@ -37,6 +41,11 @@ public struct AgentRunConfiguration: Sendable, Equatable {
     public var useRefusalFallback: Bool
     public var maxSteps: Int
     public var strictness: ConfirmationStrictness
+    /// The user has given Voxa full control when the command started. Copied here like the rest, so switching it *on* mid-command
+    /// changes nothing about that command; switching it *off* does (`AgentLoop.fullControlStillOn`), since that only ever asks more.
+    public var fullControl: Bool
+    /// Whether the reply is checked against the command before it is accepted.
+    public var verifyCompletion: Bool
     public var disabledTools: Set<String>
     public var followUpWindow: TimeInterval
 
@@ -49,6 +58,8 @@ public struct AgentRunConfiguration: Sendable, Equatable {
         useRefusalFallback = settings.useRefusalFallback
         maxSteps = settings.maxAgentSteps
         strictness = settings.confirmationStrictness
+        fullControl = settings.fullControl
+        verifyCompletion = settings.verifyCompletion
         disabledTools = settings.disabledTools
         followUpWindow = TimeInterval(settings.followUpWindowSeconds)
     }

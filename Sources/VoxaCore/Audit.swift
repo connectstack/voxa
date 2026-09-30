@@ -16,6 +16,8 @@ public struct AuditEntry: Codable, Sendable, Equatable {
         case toolResult
         /// A tool needed a system permission Voxa didn't have yet: it asked, or the user had said no.
         case permission
+        /// Whether the model's answer was checked against what the user asked before it was accepted.
+        case completionCheck
         /// The final reply shown to the user.
         case reply
         /// The run ended in a failure.

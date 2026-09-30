@@ -61,7 +61,7 @@ extension L10n {
 
         public static func category(for tool: String) -> Category {
             switch tool {
-            case "open_app", "open_url": .apps
+            case "open_app", "open_url", "wait": .apps
             case "list_shortcuts", "run_shortcut", "run_applescript": .scripts
             case _ where tool.hasPrefix("calendar_") || tool.hasPrefix("reminders_"): .calendar
             case "clipboard_read", "clipboard_write", "get_frontmost_context": .clipboard
@@ -75,6 +75,7 @@ extension L10n {
             switch tool {
             case "open_app": String(localized: "Open apps", comment: "Tool name")
             case "open_url": String(localized: "Open links", comment: "Tool name")
+            case "wait": String(localized: "Wait for a page to load", comment: "Tool name")
             case "list_shortcuts": String(localized: "List Shortcuts", comment: "Tool name")
             case "run_shortcut": String(localized: "Run Shortcuts", comment: "Tool name")
             case "run_applescript": String(localized: "Run AppleScript", comment: "Tool name")
@@ -104,6 +105,7 @@ extension L10n {
             switch tool {
             case "open_app": String(localized: "Opens or switches to an app you name.", comment: "Tool description")
             case "open_url": String(localized: "Opens a web page or link in your browser.", comment: "Tool description")
+            case "wait": String(localized: "Pauses a few seconds so a page or app can finish opening before Voxa looks at it.", comment: "Tool description")
             case "list_shortcuts": String(localized: "Looks up the names of your Shortcuts.", comment: "Tool description")
             case "run_shortcut": String(localized: "Runs one of your Shortcuts by name.", comment: "Tool description")
             case "run_applescript": String(localized: "Runs a script that you read and approve first.", comment: "Tool description")
@@ -214,6 +216,7 @@ extension L10n {
                 case "allow": return String(localized: "“\(tool)” was allowed to run", comment: "History line")
                 case "notice": return String(localized: "“\(tool)” ran, with a notice", comment: "History line")
                 case "confirm": return String(localized: "Asked you about “\(tool)”", comment: "History line")
+                case "auto": return FullControl.ranWithoutAsking(tool)
                 case "deny": return String(localized: "“\(tool)” was blocked: \(entry.detail ?? "")", comment: "History line. The second argument is the reason")
                 default: return String(localized: "“\(tool)” wasn't run: \(entry.detail ?? "")", comment: "History line. The second argument is the reason")
                 }
@@ -230,6 +233,12 @@ extension L10n {
                     : String(localized: "“\(tool)” finished", comment: "History line")
             case .permission:
                 return String(localized: "“\(tool)” needed a permission that is off", comment: "History line")
+            case .completionCheck:
+                switch entry.outcome {
+                case "done": return CompletionCheck.checkedDone
+                case "notDone": return CompletionCheck.checkedNotYet(entry.detail ?? "")
+                default: return CompletionCheck.checkUnavailable
+                }
             case .reply:
                 return String(localized: "Voxa replied: \(entry.detail ?? "")", comment: "History line. The argument is the reply")
             case .failure:

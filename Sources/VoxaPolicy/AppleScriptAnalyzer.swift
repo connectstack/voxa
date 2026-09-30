@@ -228,6 +228,9 @@ public enum AppleScriptAnalyzer {
     ]
 
     /// Applications that run code or expose secrets; controlling them from a script is the same as having a shell.
+    /// Voxa, by name and by bundle identifier: a script must not click through its Settings.
+    private static let ownNames: Set<String> = ["voxa", "com.rohitsainier.voxa"]
+
     private static let blockedApps: Set<String> = [
         "terminal", "iterm", "iterm2", "script editor", "automator", "shortcuts events", "keychain access",
         "com.apple.terminal", "com.googlecode.iterm2", "com.apple.scripteditor2", "com.apple.automator",
@@ -270,6 +273,9 @@ public enum AppleScriptAnalyzer {
         for token in tokens {
             if case .string(let text) = token, blockedApps.contains(normalizedAppName(text)) {
                 return "Scripts can't control \(displayName(of: text)); that would let a script run commands."
+            }
+            if case .string(let text) = token, ownNames.contains(normalizedAppName(text)) {
+                return "Scripts can't control Voxa itself; its settings are only for you to change."
             }
         }
         return dynamicTargetReason(tokens: tokens)

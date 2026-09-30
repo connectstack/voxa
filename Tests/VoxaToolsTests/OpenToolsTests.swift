@@ -219,6 +219,15 @@ struct OpenURLToolTests {
         #expect(result.notice == "Opened example.com")
     }
 
+    @Test("what it returns says the page was only opened, so 'play' or 'click the first result' isn't taken as done")
+    func onlyOpens() async throws {
+        let result = try await tool.execute(["url": "https://www.youtube.com/results?search_query=hanuman+chalisa"], context: ToolContext())
+        #expect(result.plainText == "Opened www.youtube.com. The page may still be loading, and nothing on it has been clicked.")
+        #expect(result.provenance == .trusted)
+        #expect(tool.summary.contains("It only opens the page"))
+        #expect(tool.summary.contains("carry on in the page once it has loaded"))
+    }
+
     @Test("even if a blocked address reached execution, it would not be opened")
     func blockedAtRunTime() async {
         await #expect(throws: ToolInputError.self) {

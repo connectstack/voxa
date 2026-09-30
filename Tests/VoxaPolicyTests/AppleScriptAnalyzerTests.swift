@@ -35,6 +35,11 @@ private let forbiddenScripts: [(name: String, source: String)] = [
     ("Automator", #"tell application "Automator" to run"#),
     ("Shortcuts Events", #"tell application "Shortcuts Events" to run shortcut "x""#),
     ("Keychain Access", #"tell application "Keychain Access" to activate"#),
+    ("Voxa itself", #"tell application "Voxa" to activate"#),
+    ("Voxa in lower case", #"tell application "voxa" to activate"#),
+    ("Voxa by bundle id", #"tell application id "com.rohitsainier.voxa" to activate"#),
+    ("Voxa by path", #"tell application "/Applications/Voxa.app" to activate"#),
+    ("Voxa's windows through System Events", #"tell application "System Events" to tell process "Voxa" to click button 1 of window 1"#),
     ("terminal as a string variable", "set t to \"Terminal\"\ntell process t to set frontmost to true"),
     (
         "terminal through System Events",
@@ -100,6 +105,7 @@ private let permittedScripts: [(name: String, source: String)] = [
     ("a French quotation in text", #"display dialog "Voulez-vous « continuer » ?""#),
     ("a variable called machine name", #"return computer name"#),
     ("continued line in ordinary code", "set x to 1 + ¬\n 2\nreturn x"),
+    ("a name that only starts like Voxa", #"display dialog "Voxalis is a moth""#),
 ]
 
 @Suite("AppleScriptAnalyzer")
@@ -127,6 +133,7 @@ struct AppleScriptAnalyzerTests {
         #expect(blockReason(#"do shell script "ls""#)?.contains("no shell") == true)
         #expect(blockReason(#"open location "https://x.com""#)?.contains("open_url") == true)
         #expect(blockReason("tell application appName to activate")?.contains("in quotes") == true)
+        #expect(blockReason(#"tell application "Voxa" to activate"#)?.contains("Voxa itself") == true)
     }
 
     // MARK: Things that may run (after the user confirms)

@@ -162,6 +162,8 @@ public struct StubTool: AgentTool {
     public var inputSchema: JSONValue
     public var baselineRisk: RiskLevel
     public var requiredPermissions: Set<PermissionKind> = []
+    /// Set on a stub that stands for opening a page or clicking: a step, not the whole job.
+    public var mayLeaveTaskUnfinished = false
     public var assessment: @Sendable (JSONValue) throws -> ToolAssessment
     public var behavior: @Sendable (JSONValue) async throws -> ToolResult
     public let recorder = ToolRecorder()
@@ -212,6 +214,54 @@ public struct StubTool: AgentTool {
     public func execute(_ input: JSONValue, context: ToolContext) async throws -> ToolResult {
         recorder.record(input)
         return try await behavior(input)
+    }
+}
+
+// MARK: - The completion check
+
+/// A `CompletionVerifying` that answers from a script (the last answer repeats) and remembers what it was asked. An answer of
+/// nil is "no answer could be had". `hold` makes it wait, as a model that doesn't reply would.
+public final class ScriptedVerifier: CompletionVerifying, @unchecked Sendable {
+    public enum Answer: Sendable {
+        case verdict(CompletionVerdict?)
+        /// Never answers on its own, and doesn't notice cancellation, like a request that has gone quiet.
+        case hold
+    }
+
+    private struct State {
+        var answers: [Answer]
+        var evidence: [CompletionEvidence] = []
+        var configurations: [AgentRunConfiguration] = []
+    }
+
+    private let state: OSAllocatedUnfairLock<State>
+    private let gate = AsyncGate()
+
+    public init(_ answers: [Answer]) {
+        state = OSAllocatedUnfairLock(initialState: State(answers: answers))
+    }
+
+    public convenience init(_ verdicts: CompletionVerdict?...) {
+        self.init(verdicts.map { .verdict($0) })
+    }
+
+    /// What it was shown, in order.
+    public var evidence: [CompletionEvidence] { state.withLock { $0.evidence } }
+    public var configurations: [AgentRunConfiguration] { state.withLock { $0.configurations } }
+    public var calls: Int { state.withLock { $0.evidence.count } }
+
+    public func verdict(for evidence: CompletionEvidence, configuration: AgentRunConfiguration) async -> CompletionVerdict? {
+        let answer = state.withLock { state -> Answer in
+            state.evidence.append(evidence)
+            state.configurations.append(configuration)
+            return state.answers.count > 1 ? state.answers.removeFirst() : (state.answers.first ?? .verdict(nil))
+        }
+        switch answer {
+        case .verdict(let verdict): return verdict
+        case .hold:
+            await gate.wait()
+            return nil
+        }
     }
 }
 

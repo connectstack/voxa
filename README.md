@@ -94,10 +94,13 @@ that opens Settings. Try it without the app: `swift run voxa-dev transcribe clip
 ## What Voxa can do
 
 Every tool has a switch in **Settings → Tools**; a tool that is off is hidden from the model and refused if called anyway.
+The right-hand column is how Voxa behaves out of the box: **Settings → Safety → Full control** (off by default) turns the
+asking off, and the Safety section below says exactly what it changes.
 
 | Tool | What it does | How it is treated |
 |------|--------------|-------------------|
-| Open apps, open links | Opens an app or a web page | Runs, and tells you |
+| Open apps, open links | Opens an app or a web page (only opens it: playing or clicking something on it is a further step) | Runs, and tells you |
+| Wait | Pauses up to 10 seconds so a page or app can finish opening before Voxa looks at it | Just runs |
 | List and run Shortcuts | Runs one of your Shortcuts | **Always asks** |
 | Run AppleScript | Runs a script you read first | **Always asks**; shell routes are refused |
 | Read your calendar | Lists events for a day or a week | Runs; what it returns is untrusted data |
@@ -228,13 +231,36 @@ exhaustively tested. The rules, all in force in this milestone:
   it reaches the model wrapped in a random-boundary envelope, stripped of invisible characters, and can't close its own
   envelope. The system prompt tells the model to treat it as data.
 - **Three risk tiers, decided by code, not by the model.** Read-only actions run; reversible ones run with a notice;
-  sensitive ones (running scripts and Shortcuts, moving or trashing files, a button that sends or deletes, a quit shortcut) **always** ask. Risk only goes
+  sensitive ones (running scripts and Shortcuts, moving or trashing files, a button that sends or deletes, a quit shortcut) **always** ask,
+  unless you have given Voxa full control (below). Risk only goes
   *up*: the highest of what the tool says, what the policy says about that tool, and what the call turns out to be. The
   model can't pass a "risk" or "confirmed" argument; the tool schemas forbid extra arguments and every call is validated
   against them.
 - **Untrusted content raises the bar.** After the model has read anything from outside your command, even reversible
   actions ask, and the card says why. (In testing, a script whose output told the model to open a hostile link did fool the
   scripted model. The link was not opened without a prompt, and declining it ended the attempt.)
+- **Full control is a switch only you can flip.** *Settings → Safety → Full control* (off by default) makes Voxa carry out
+  commands without an Allow card: deleting and moving files, calendar changes, AppleScripts and Shortcuts, clicks and typing in
+  other apps (System Settings and Disk Utility included), and everything that would have asked because it had read something from
+  outside. Turning it on asks you first (*Give Voxa full control?*);
+  turning it off is immediate, even for a command that is running: its next action asks. While it is on, the menu-bar menu says **Full control is on** and has *Turn Off Full Control*, the
+  Tools tab says so, and History marks each action that ran that way (*ran without asking (full control)*). It is read from your
+  settings when a command starts, never from the model or anything it reads, and Voxa's own windows are off limits to its UI tools
+  and its scripts, so a fooled model can't open Settings and switch it on. It removes questions, not refusals: password fields,
+  terminals and password managers, hidden and Library files, shell access from scripts (`do shell script`, Terminal) and blocked
+  links stay refused. macOS's own permission prompts are the system's and still appear. The model is told confirmations are off,
+  so it takes more care with what can't be undone. The price is real: with it on, something a web page or an email says to the
+  model can be acted on without you seeing it first, and a script nobody read runs. The script check that refuses the routes to a
+  shell is a speed bump, not a sandbox, and with full control on there is no reader behind it.
+- **Voxa checks that a command is really finished.** Models like to stop at the first step that looks like an answer ("I opened
+  the search results" for *play it on YouTube*). When the model wants to reply after a step that may be only a start (opening a
+  page or an app, waiting, looking, clicking, typing, a script), the reply is first put to a short separate request to the same
+  model, with no tools: *given what the user said, the names of what was done, and this reply, is anything they asked for plainly
+  still left?* It answers in a fixed shape (done or not, what is left, how sure). If something is left and it is sure, the model
+  is sent back to finish, at most twice, with a note that can only ask for the user's own command; if the check can't be made,
+  or the model asked you a question, or you said no to something on the way, the reply stands. The check never sees what a page,
+  window or file returned, only your words, the names of the steps (as data) and the reply. It costs one short extra request
+  after such commands; *Settings → Safety → Check that a command is finished* turns it off, and History shows each check.
 - **You see the real thing.** The card is written by the tool's own code from the validated arguments: the whole script,
   the exact address, the app. Hidden and text-direction characters are shown as visible markers.
 - **No shell.** There is no arbitrary-command tool. AppleScript that reaches for `do shell script`, Terminal, other scripts,
@@ -281,7 +307,7 @@ exhaustively tested. The rules, all in force in this milestone:
 ## Development
 
 ```bash
-make test         # unit tests (1,069 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
+make test         # unit tests (1,154 of them, ~10 s: includes real windows on the screen, a real osascript and a real speech voice)
 make lint         # SwiftLint
 make format       # SwiftFormat
 make snapshots    # render the HUD in every state, light and dark, to build/snapshots
@@ -518,6 +544,32 @@ window of its own. Use `make run-signed` so the Accessibility grant survives reb
       downloaded, with a button that opens Settings. Cancel a download part-way: it stops, and Download carries on from there.
 - [ ] Say nothing while Whisper is on: *I didn't catch that*, never invented words such as "Thank you for watching".
 - [ ] (Ollama) With a model that can't see images, ask for a screenshot: the model is told it can't, and says so in its reply.
+
+**Full control: needs you to click (nothing here has been clicked by anyone but a test)**
+
+- [ ] Settings → Safety → **Run commands without asking me**: flipping it on shows *Give Voxa full control?* with **Give Full
+      Control** and **Keep Asking**. Keep Asking (or Esc) leaves the switch off. Give Full Control turns it on, and the *Ask before
+      acting* picker greys out.
+- [ ] With it on, the menu-bar menu has **Full control is on** and **Turn Off Full Control**; the Tools tab shows an orange note.
+- [ ] *"Trash the … files"* (or *"move the file called …"*) now goes straight through, with no card; the HUD still shows what it is
+      doing. Settings → History says *ran without asking (full control)* for it.
+- [ ] *"Run an AppleScript that returns 6 times 7"* now runs with no card and answers 42, and History says *ran without asking*.
+      In System Settings, *"click Privacy & Security"* goes straight through too.
+- [ ] *"Delete my .ssh folder"* and typing into a password field are still refused, and so is an AppleScript that runs a shell
+      command. Put Voxa's own Settings window in front and ask it to click something: it refuses (*It holds Voxa's own settings
+      and approvals*).
+- [ ] **Turn Off Full Control** in the menu: the switch in Settings shows off at once. Quit and reopen Voxa with it on: it is still on
+      (and the menu still says so).
+- [ ] *"Play Hanuman Chalisa on YouTube"* (or any song or video) in **one** command: the results page opens, Voxa waits for it,
+      takes a picture of the window, clicks the first real video, and the reply says it is playing. (In Brave and Chrome the page
+      can't be read as a list, so it works from the picture; the History tab shows Open links, Wait, Look at the screen, Click.)
+      Without full control it asks once, before the click. History also shows the check: *Checked that it was finished: not yet
+      (…)* if the model stopped early, then *yes* once it had finished. If it still stops at the results page, tell me which model
+      you use and what History shows.
+- [ ] Settings → Safety → **Check that a command is finished**: turn it off and give a command that only opens a page: the reply
+      stands with no check in History. Turn it on again.
+- [ ] Try it from a terminal, without the app: `swift run voxa-dev ask "…" --full-control` (add `--sample-data` to keep it away from
+      your real calendar).
 
 **Model providers: needs your OpenAI key and/or Ollama with a tool-capable model**
 

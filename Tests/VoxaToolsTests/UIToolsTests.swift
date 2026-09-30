@@ -73,6 +73,54 @@ struct UIInspectToolTests {
         let result = try await UIInspectTool(ui: rig.ui).execute([:], context: ToolContext())
         #expect(result.isError && result.plainText == "No app is in front." && result.provenance == .trusted)
     }
+
+    /// The pretend browser with its page taken away: what Chrome and Brave show of a page until their accessibility is on.
+    private func toolbarOnly(_ rig: AutomationRig) {
+        let page = rig.desktop.children(rig.desktop.window)[1]
+        for child in rig.desktop.children(page) { rig.desktop.remove(child) }
+    }
+
+    @Test("in a browser whose page isn't listed, the listing says so and points at a screenshot")
+    func browserPageNotListed() async throws {
+        let rig = AutomationRig()
+        rig.desktop.app = FrontmostApp(name: "Brave Browser", bundleID: "com.brave.Browser", pid: SampleDesktop.safariPID)
+        toolbarOnly(rig)
+        let text = try await UIInspectTool(ui: rig.ui).execute([:], context: ToolContext()).plainText
+        #expect(text.contains("e1 button “Back”"), "the toolbar is still listed")
+        #expect(text.contains("This is a web browser and the page itself isn't listed"))
+        #expect(text.contains("take a screenshot"))
+    }
+
+    @Test("but not when the page's links are listed (Safari), for another kind of app, or for the menu bar")
+    func noNoteWhenNotNeeded() async throws {
+        let rig = AutomationRig()
+        let safari = try await UIInspectTool(ui: rig.ui).execute([:], context: ToolContext()).plainText
+        #expect(!safari.contains("web browser"), "Safari lists its page, links included")
+
+        toolbarOnly(rig)
+        rig.desktop.app = FrontmostApp(name: "Notes", bundleID: "com.apple.Notes", pid: SampleDesktop.safariPID)
+        let notes = try await UIInspectTool(ui: rig.ui).execute([:], context: ToolContext()).plainText
+        #expect(!notes.contains("web browser"), "not a browser, so no talk of a page")
+
+        rig.desktop.app = FrontmostApp(name: "Brave Browser", bundleID: "com.brave.Browser", pid: SampleDesktop.safariPID)
+        let menu = try await UIInspectTool(ui: rig.ui).execute(["area": "menu_bar"], context: ToolContext()).plainText
+        #expect(!menu.contains("web browser"), "the menu bar has no page")
+    }
+
+    @Test("the browsers are recognised by bundle identifier, whatever its case, and nothing else is")
+    func browserList() {
+        let browsers = [
+            "com.apple.Safari", "com.google.Chrome", "com.brave.Browser", "org.mozilla.firefox", "com.microsoft.edgemac",
+            "company.thebrowser.Browser",
+        ]
+        for id in browsers {
+            #expect(Browsers.isBrowser(bundleID: id), "\(id)")
+        }
+        for id in ["com.apple.Notes", "com.apple.mail", "com.example.browser-like", "", "com.apple.SafariServices"] {
+            #expect(!Browsers.isBrowser(bundleID: id), "\(id)")
+        }
+        #expect(!Browsers.isBrowser(bundleID: nil))
+    }
 }
 
 @Suite("ui_click")
@@ -415,4 +463,82 @@ struct UIToolDeclarationTests {
             #expect(tool.baselineRisk == .reversible, "\(tool.name)")
         }
     }
+}
+
+// MARK: - Full control
+
+private func decision(_ tool: some AgentTool, _ assessment: ToolAssessment, fullControl: Bool) -> PolicyDecision {
+    PolicyEngine(configuration: PolicyConfiguration(fullControl: fullControl))
+        .evaluate(toolName: tool.name, baselineRisk: tool.baselineRisk, assessment: assessment, taint: RunTaint())
+}
+
+@Suite("UI tools: full control")
+struct UIToolFullControlTests {
+    private let settings = FrontmostApp(name: "System Settings", bundleID: "com.apple.systempreferences", pid: SampleDesktop.safariPID)
+
+    @Test("in an app that changes the Mac itself, every acting tool asks without full control and runs with it")
+    func macChangingApp() async throws {
+        let rig = AutomationRig()
+        let snapshot = try await rig.inspect()
+        let ref = try rig.ref("Reload", in: snapshot)
+        let page = rig.desktop.children(rig.desktop.window)[1]
+        let field = try #require(rig.desktop.children(page).first { rig.desktop.node($0)?.description == "Search documentation" })
+        rig.desktop.setFocused(field)
+        rig.desktop.app = settings
+
+        let click = UIClickTool(ui: rig.ui)
+        let type = UITypeTool(ui: rig.ui)
+        let press = UIPressKeysTool(ui: rig.ui)
+        let calls: [(any AgentTool, ToolAssessment)] = [
+            (click, try click.assess(["ref": .string(ref)])),
+            (type, try type.assess(["text": "x"])),
+            (press, try press.assess(["keys": ["cmd+l"]])),
+        ]
+        for (tool, assessment) in calls {
+            #expect(assessment.risk == .sensitive, "\(tool.name)")
+            #expect(assessment.reasons.contains { $0.contains("changes settings of the Mac") }, "\(tool.name)")
+            #expect(isConfirmation(decision(tool, assessment, fullControl: false)), "\(tool.name) asks by default")
+            #expect(decision(tool, assessment, fullControl: true).isAuto, "\(tool.name) runs with full control")
+        }
+    }
+
+    @Test("in an ordinary app a risky click asks by default and runs under full control")
+    func ordinaryApp() async throws {
+        let rig = AutomationRig()
+        let snapshot = try await rig.inspect()
+        let click = UIClickTool(ui: rig.ui)
+        let risky = try click.assess(["ref": .string(try rig.ref("Send Feedback", in: snapshot))])
+        #expect(risky.risk == .sensitive)
+        #expect(isConfirmation(decision(click, risky, fullControl: false)))
+        guard case .allowByFullControl(_, let wouldAsk) = decision(click, risky, fullControl: true) else {
+            Issue.record("expected the click to run")
+            return
+        }
+        #expect(!wouldAsk.isEmpty, "what it would have asked is kept")
+
+        let quit = UIPressKeysTool(ui: rig.ui)
+        let consequential = try quit.assess(["keys": ["cmd+q"]])
+        #expect(decision(quit, consequential, fullControl: true).isAuto)
+    }
+
+    @Test("Voxa's own windows are refused, so it can't click through its own Settings")
+    func voxaItself() async throws {
+        let rig = AutomationRig()
+        let snapshot = try await rig.inspect()
+        let ref = try rig.ref("Reload", in: snapshot)
+        rig.desktop.app = FrontmostApp(name: "Voxa", bundleID: "com.rohitsainier.voxa", pid: SampleDesktop.safariPID)
+        for tool: any AgentTool in [UIInspectTool(ui: rig.ui), UIPressKeysTool(ui: rig.ui)] {
+            let input: JSONValue = tool.name == "ui_inspect" ? [:] : ["keys": ["return"]]
+            let assessment = try tool.assess(input)
+            #expect(assessment.block != nil, "\(tool.name)")
+            #expect(decision(tool, assessment, fullControl: true).isDenied, "\(tool.name), even with full control")
+        }
+        let blocked = try? UIClickTool(ui: rig.ui).assess(["ref": .string(ref)])
+        #expect(blocked == nil || blocked?.block != nil)
+    }
+}
+
+private extension PolicyDecision {
+    var isAuto: Bool { if case .allowByFullControl = self { true } else { false } }
+    var isDenied: Bool { if case .deny = self { true } else { false } }
 }

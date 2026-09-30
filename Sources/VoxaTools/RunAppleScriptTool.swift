@@ -33,6 +33,8 @@ public struct RunAppleScriptTool: TypedTool {
     )
     public let baselineRisk = RiskLevel.sensitive
     public let requiredPermissions: Set<PermissionKind> = [.automation]
+    /// May be only a step towards what the user asked (see `AgentTool.mayLeaveTaskUnfinished`).
+    public let mayLeaveTaskUnfinished = true
 
     private let runner: any ProcessRunning
     private let timeout: Duration

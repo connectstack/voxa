@@ -84,7 +84,9 @@ public actor AgentService {
             audit: audit,
             systemPrompt: systemPrompt,
             clock: clock,
-            limits: limits(for: configuration.provider)
+            limits: limits(for: configuration.provider),
+            fullControlStillOn: { [settings] in await settings().fullControl },
+            verifier: LLMCompletionVerifier(llm: llm)
         )
         let output = await loop.run(
             command: command,
@@ -103,10 +105,13 @@ public actor AgentService {
         guard provider == .ollama else { return limits }
         var adjusted = limits
         adjusted.totalTimeout = max(limits.totalTimeout, Self.localModelTimeout)
+        adjusted.checkTimeout = max(limits.checkTimeout, Self.localModelCheckTimeout)
         return adjusted
     }
 
     static let localModelTimeout: Duration = .seconds(300)
+    /// A local model may have to load before it can answer even a short question.
+    static let localModelCheckTimeout: Duration = .seconds(45)
 
     /// Everything that shapes a request. History built under one fingerprint can't be reused under another.
     private func fingerprint(for configuration: AgentRunConfiguration) -> String {

@@ -38,6 +38,11 @@ actor RunDeadline {
         return now - pausedTotal - currentPause
     }
 
+    /// How much of the budget is left.
+    func remaining() -> Duration {
+        max(limit - used(), .zero)
+    }
+
     /// Returns when the budget is spent. Throws `CancellationError` if the caller stops waiting first.
     func waitUntilExpired() async throws {
         while true {

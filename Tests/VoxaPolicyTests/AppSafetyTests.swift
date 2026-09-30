@@ -34,6 +34,17 @@ struct AppSafetyTests {
         }
     }
 
+    @Test("Voxa itself is off limits, so its own tools can't click through its Settings or its approvals", arguments: [
+        "com.rohitsainier.voxa", "com.rohitsainier.Voxa", "COM.ROHITSAINIER.VOXA",
+    ])
+    func voxaItself(bundleID: String) {
+        guard case .untouchable(let reason) = AppSafety.restriction(bundleID: bundleID) else {
+            Issue.record("\(bundleID) should be untouchable")
+            return
+        }
+        #expect(reason.contains("Voxa's own settings"))
+    }
+
     @Test("apps that change the Mac are allowed, but every action in them is asked about", arguments: [
         "com.apple.systempreferences", "com.apple.DiskUtility", "com.apple.ActivityMonitor", "com.apple.controlcenter",
     ])

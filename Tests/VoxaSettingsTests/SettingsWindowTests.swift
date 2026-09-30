@@ -179,6 +179,28 @@ struct EveryPageWindowTests {
         controller.close()
     }
 
+    @Test("full control going on and off under the Safety and Tools tabs, as the menu-bar item does, never resizes the window")
+    func fullControlWhileShowing() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let store = makeStore()
+        let controller = SettingsWindowController(store: store, services: fullServices())
+        controller.show(tab: .safety)
+        await pump(0.3)
+        let size = try #require(controller.windowFrame).size
+
+        for tab in [SettingsView.Tab.safety, .tools, .safety, .tools] {
+            controller.show(tab: tab)
+            for on in [true, false, true, false] {
+                store.current.fullControl = on
+                await pump(0.1)
+                #expect(controller.selectedTab == tab)
+                #expect(controller.windowFrame?.size == size, "\(tab) with full control \(on) resized the window")
+            }
+        }
+        controller.close()
+    }
+
     @Test("the walkthrough opens in a real window, is a fixed size, and can be opened again and closed repeatedly")
     func walkthroughWindow() async throws {
         _ = NSApplication.shared
@@ -225,11 +247,14 @@ struct EveryPageWindowTests {
         let store = makeStore()
         let controller = OnboardingWindowController(store: store, services: fullServices())
         #expect(!store.current.onboardingCompleted)
+        // The window this controller opens, not whichever walkthrough window the process happens to list first.
+        let before = Set(NSApp.windows.map(ObjectIdentifier.init))
         controller.show()
-        await pump(0.2)
-        NSApp.windows.first { $0.title == L10n.Onboarding.windowTitle }?.close()
-        await pump(0.1)
-        #expect(store.current.onboardingCompleted)
+        #expect(await waitUntil { controller.isVisible })
+        let mine = NSApp.windows.first { $0.title == L10n.Onboarding.windowTitle && !before.contains(ObjectIdentifier($0)) }
+        #expect(mine != nil, "the walkthrough opened a window")
+        mine?.close()  // the window's own close button, rather than the walkthrough's Done
+        #expect(await waitUntil { store.current.onboardingCompleted })
     }
 
     @Test("each step of the walkthrough lays out at the window's size without trouble")
@@ -244,5 +269,49 @@ struct EveryPageWindowTests {
             #expect(host.frame.size == OnboardingView.contentSize, "\(step)")
             await pump(0.05)
         }
+    }
+}
+
+@MainActor
+@Suite("Full control: the question", .serialized, .enabled(if: CGDisplayIsActive(CGMainDisplayID()) != 0))
+struct FullControlQuestionTests {
+    private struct Host: View {
+        @State var asking = true
+        var body: some View {
+            Text("host")
+                .frame(width: 300, height: 200)
+                .fullControlQuestion(isPresented: $asking, give: {}, keepAsking: {})
+        }
+    }
+
+    private func buttons(in view: NSView) -> [NSButton] {
+        (view as? NSButton).map { [$0] } ?? [] + view.subviews.flatMap(buttons)
+    }
+
+    @Test("Return can't turn full control on: its button is not the default one, and Esc is Keep Asking")
+    func returnDoesNotGiveControl() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let window = NSWindow(
+            contentRect: NSRect(x: 300, y: 300, width: 300, height: 200),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: Host())
+        window.orderFrontRegardless()
+        defer { window.close() }
+        try? await Task.sleep(for: .milliseconds(700))
+
+        let sheet = try #require(window.attachedSheet, "the question is showing")
+        let found = buttons(in: try #require(sheet.contentView))
+        let give = try #require(found.first { $0.title == L10n.FullControl.confirmGive })
+        let keep = try #require(found.first { $0.title == L10n.FullControl.confirmKeepAsking })
+
+        #expect(give.keyEquivalent != "\r", "Return must not press Give Full Control")
+        #expect(sheet.defaultButtonCell?.title != L10n.FullControl.confirmGive)
+        #expect(keep.keyEquivalent == "\u{1B}", "Esc keeps asking")
+        window.endSheet(sheet)
     }
 }

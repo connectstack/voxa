@@ -140,7 +140,9 @@ func ask(_ arguments: [String]) async {
     guard let command = arguments.first, !command.hasPrefix("--") else { fail("Missing command.\n\n\(usage)") }
     let setup = ProviderSetup(arguments)
     let provider = setup.provider
-    let settings = setup.settings
+    var configured = setup.settings
+    configured.fullControl = arguments.contains("--full-control")
+    let settings = configured
     let llm = setup.llm
 
     let modes = (option("--confirm", in: arguments) ?? "ask").split(separator: ",").compactMap {
@@ -163,7 +165,7 @@ func ask(_ arguments: [String]) async {
         systemPrompt: prompt,
         settings: { settings }
     )
-    print("provider: \(provider.rawValue)  model: \(settings.activeModel)")
+    print("provider: \(provider.rawValue)  model: \(settings.activeModel)\(settings.fullControl ? "  full control: on" : "")")
     print("command: \(command)")
     let result = await service.run(command) { event in
         switch event {

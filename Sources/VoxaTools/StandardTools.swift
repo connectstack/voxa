@@ -12,6 +12,7 @@ public enum StandardTools {
         [
             OpenAppTool(catalog: catalog, opener: opener),
             OpenURLTool(catalog: catalog, opener: opener),
+            WaitTool(),
             ListShortcutsTool(runner: runner),
             RunShortcutTool(runner: runner),
             RunAppleScriptTool(runner: runner),

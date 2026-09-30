@@ -51,7 +51,7 @@ struct StandardToolsTests {
         #expect(Set(names).count == names.count)
         #expect(
             Set(names) == [
-                "open_app", "open_url", "list_shortcuts", "run_shortcut", "run_applescript",
+                "open_app", "open_url", "wait", "list_shortcuts", "run_shortcut", "run_applescript",
                 "calendar_list_events", "calendar_create_event", "calendar_update_event", "calendar_delete_event",
                 "reminders_list", "reminders_create", "clipboard_read", "clipboard_write", "get_frontmost_context",
                 "ui_inspect", "ui_click", "ui_type", "ui_press_keys", "screenshot",
@@ -63,6 +63,21 @@ struct StandardToolsTests {
             #expect(tool.definition.name == tool.name)
         }
         #expect(ToolRegistry([]).definitions().isEmpty)
+    }
+
+    @Test("the tools that may be only a step towards what was asked are the ones that open, look and drive, and no others")
+    func stepsNotOutcomes() {
+        let steps = Set(tools.filter(\.mayLeaveTaskUnfinished).map(\.name))
+        #expect(
+            steps == [
+                "open_app", "open_url", "wait", "run_shortcut", "run_applescript", "screenshot", "ui_inspect", "ui_click", "ui_type",
+                "ui_press_keys",
+            ]
+        )
+        // These finish what they were asked to do, so the command needs no second look after them.
+        for name in ["calendar_create_event", "calendar_delete_event", "reminders_create", "clipboard_write", "file_move", "file_trash"] {
+            #expect(!steps.contains(name), "\(name)")
+        }
     }
 
     @Test("every schema is a closed object: the model can't pass arguments the tool doesn't declare")
@@ -93,6 +108,7 @@ struct StandardToolsTests {
         let byName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.baselineRisk) })
         #expect(byName["open_app"] == .reversible)
         #expect(byName["open_url"] == .reversible)
+        #expect(byName["wait"] == .readOnly)
         #expect(byName["list_shortcuts"] == .readOnly)
         #expect(byName["run_shortcut"] == .sensitive)
         #expect(byName["run_applescript"] == .sensitive)

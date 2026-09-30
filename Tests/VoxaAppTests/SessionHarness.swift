@@ -62,10 +62,10 @@ final class SessionHarness {
         return await waitUntil { await capture.isCapturing }
     }
 
-    /// Lets the "not an accidental tap" hold time pass.
+    /// Lets the "not an accidental tap" hold time pass, and waits until the controller has noticed that it has: its timer task sets
+    /// the flag a moment after the clock moves, and a key released before that would count as a tap.
     func holdLongEnough() async {
-        clock.advance(by: .milliseconds(300))
-        await settle()
+        _ = await advanceClock(by: .milliseconds(300)) { controller.run?.minimumHoldElapsed == true }
     }
 
     /// Releases the key and lets the release tail elapse, which stops the microphone.

@@ -12,7 +12,7 @@ public enum AppSafety {
         case none
         /// Voxa neither reads nor drives it. The reason is written for the person, and is the model's explanation too.
         case untouchable(reason: String)
-        /// Whatever Voxa does there is asked about first, however small.
+        /// Whatever Voxa does there is asked about first, however small (unless the user has given Voxa full control).
         case alwaysAsk(reason: String)
     }
 
@@ -31,6 +31,9 @@ public enum AppSafety {
         }
         if authenticationPrompts.contains(id) {
             return .untouchable(reason: "It is where passwords are typed to approve changes to the Mac. Only you should do that.")
+        }
+        if ownApp.contains(id) {
+            return .untouchable(reason: "It holds Voxa's own settings and approvals, which only you change.")
         }
         if systemSettings.contains(id) {
             return .alwaysAsk(reason: "It changes settings of the Mac.")
@@ -65,6 +68,11 @@ public enum AppSafety {
     /// The windows macOS raises to ask for an administrator's password, and the lock screen.
     private static let authenticationPrompts: Set<String> = [
         "com.apple.securityagent", "com.apple.loginwindow",
+    ]
+
+    /// Voxa itself. Its Settings decide what it may do, so it must not be able to click through them, however it is asked.
+    private static let ownApp: Set<String> = [
+        "com.rohitsainier.voxa",
     ]
 
     private static let systemSettings: Set<String> = [

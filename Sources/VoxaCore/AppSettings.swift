@@ -97,6 +97,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
     // MARK: Safety
 
     public var confirmationStrictness: ConfirmationStrictness
+    /// The user has given Voxa full control: actions that would have asked first, scripts and apps that change the Mac included,
+    /// run straight away instead. What Voxa refuses outright is still refused. Off unless the user switches it on in Settings;
+    /// nothing the model says or reads can change it.
+    public var fullControl: Bool
+    /// Before a command's reply is accepted, the model is asked once more, in a short separate request, whether everything the
+    /// user asked for was really done (opening a page is not playing it), and carries on if not. Costs one extra short request
+    /// after commands that open or click things. On unless the user switches it off.
+    public var verifyCompletion: Bool
     /// Names of tools the user has switched off. They are hidden from the model and refused if called anyway.
     public var disabledTools: Set<String>
 
@@ -126,6 +134,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         voiceIdentifier: String = "",
         speechRate: Double = AppSettings.defaultSpeechRate,
         confirmationStrictness: ConfirmationStrictness = .standard,
+        fullControl: Bool = false,
+        verifyCompletion: Bool = true,
         disabledTools: Set<String> = [],
         onboardingCompleted: Bool = false
     ) {
@@ -149,6 +159,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.voiceIdentifier = voiceIdentifier
         self.speechRate = speechRate
         self.confirmationStrictness = confirmationStrictness
+        self.fullControl = fullControl
+        self.verifyCompletion = verifyCompletion
         self.disabledTools = disabledTools
         self.onboardingCompleted = onboardingCompleted
     }
@@ -160,7 +172,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case provider, model, openAIModel, openAIBaseURL, ollamaModel, ollamaBaseURL, ollamaContextLength
         case effort, useRefusalFallback, maxAgentSteps, followUpWindowSeconds
         case speakReplies, voiceIdentifier, speechRate
-        case confirmationStrictness, disabledTools, onboardingCompleted
+        case confirmationStrictness, fullControl, verifyCompletion, disabledTools, onboardingCompleted
     }
 
     public init(from decoder: any Decoder) throws {
@@ -202,6 +214,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         speechRate = rate.isFinite ? min(max(rate, Self.speechRateRange.lowerBound), Self.speechRateRange.upperBound) : defaults.speechRate
 
         confirmationStrictness = value(.confirmationStrictness, defaults.confirmationStrictness)
+        // Anything that isn't a plain true (missing, garbled, from another version) leaves confirmations on.
+        fullControl = value(.fullControl, defaults.fullControl)
+        verifyCompletion = value(.verifyCompletion, defaults.verifyCompletion)
         disabledTools = value(.disabledTools, defaults.disabledTools)
         onboardingCompleted = value(.onboardingCompleted, defaults.onboardingCompleted)
     }

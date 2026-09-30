@@ -25,6 +25,18 @@ final class Run: @unchecked Sendable {
     var declines = 0
     var declined: Set<String> = []
 
+    /// One tool call that ran: what it was called, whether it worked, and whether it may have been only a step. The check reads
+    /// this, not what the tools returned.
+    struct Step {
+        var title: String
+        var succeeded: Bool
+        var mayLeaveTaskUnfinished: Bool
+    }
+
+    var trace: [Step] = []
+    /// How many times the completion check has been asked for this command (whatever it answered).
+    var checks = 0
+
     init(
         id: UUID,
         command: String,
@@ -86,7 +98,7 @@ final class Run: @unchecked Sendable {
             guard !actions.isEmpty else { return base }
             memory.messages =
                 base.messages + [
-                    .user(AgentLoop.userTurn(command: command, context: context)),
+                    .user(AgentLoop.userTurn(command: command, context: context, fullControl: configuration.fullControl)),
                     LLMMessage(
                         role: .assistant,
                         content: [

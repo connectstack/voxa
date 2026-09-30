@@ -30,7 +30,9 @@ struct LoopHarness {
         confirmations: ScriptedConfirmations = ScriptedConfirmations(),
         permissions: any ToolPermissionGranting = UnrestrictedToolPermissions(),
         limits: AgentLimits = AgentLimits(),
-        settings: AppSettings = AppSettings(localeIdentifier: "en_US")
+        settings: AppSettings = AppSettings(localeIdentifier: "en_US"),
+        fullControlStillOn: @escaping @Sendable () async -> Bool = { true },
+        verifier: (any CompletionVerifying)? = nil
     ) {
         llm = ScriptedLLM(turns)
         self.confirmations = confirmations
@@ -43,7 +45,9 @@ struct LoopHarness {
             audit: audit,
             systemPrompt: SystemPrompt(template: "You are a test. At most {{max_steps}} steps."),
             clock: clock,
-            limits: limits
+            limits: limits,
+            fullControlStillOn: fullControlStillOn,
+            verifier: verifier
         )
     }
 

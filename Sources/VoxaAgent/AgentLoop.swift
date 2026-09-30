@@ -9,7 +9,8 @@ import VoxaPolicy
 ///
 /// Guarantees this type is responsible for (each has a test):
 /// - **Nothing runs unless the policy allows it.** Every call goes through argument validation, the tool's own assessment
-///   and `PolicyEngine`; a sensitive call waits for the user, whatever the model wrote.
+///   and `PolicyEngine`; a sensitive call waits for the user, whatever the model wrote (unless the user has given Voxa full
+///   control, a setting only they can change; refusals are refused either way).
 /// - **Outside content stays data.** Tool output that isn't Voxa's own text is wrapped in the untrusted-data envelope, and
 ///   once it has entered the conversation the policy asks before further state-changing actions.
 /// - **Bounded.** A step cap, a per-tool timeout, a total timeout that doesn't tick while the user decides, and a cap on
@@ -25,6 +26,12 @@ public struct AgentLoop: Sendable {
     let systemPrompt: SystemPrompt
     let clock: any Clock<Duration>
     let limits: AgentLimits
+    /// Whether the user still has full control switched on. Asked before each call, and only ever able to take full control
+    /// *away* from a command that started with it: a command started without it never gains it, but one the user switches
+    /// off mid-way starts asking again from the next action, instead of running to the end under the old setting.
+    let fullControlStillOn: @Sendable () async -> Bool
+    /// Checks that a command is really finished before its reply is accepted. nil means nothing is checked.
+    let verifier: (any CompletionVerifying)?
 
     public struct Output: Sendable {
         public var result: AgentRunResult
@@ -40,7 +47,9 @@ public struct AgentLoop: Sendable {
         audit: any AuditLogging = DiscardingAuditLog(),
         systemPrompt: SystemPrompt,
         clock: any Clock<Duration> = ContinuousClock(),
-        limits: AgentLimits = AgentLimits()
+        limits: AgentLimits = AgentLimits(),
+        fullControlStillOn: @escaping @Sendable () async -> Bool = { true },
+        verifier: (any CompletionVerifying)? = nil
     ) {
         self.llm = llm
         self.registry = registry
@@ -50,6 +59,8 @@ public struct AgentLoop: Sendable {
         self.systemPrompt = systemPrompt
         self.clock = clock
         self.limits = limits
+        self.fullControlStillOn = fullControlStillOn
+        self.verifier = verifier
     }
 
     // MARK: Entry point
@@ -71,7 +82,8 @@ public struct AgentLoop: Sendable {
             onEvent: onEvent
         )
         await record(run, .command, detail: command)
-        run.messages = memory.messages + [.user(Self.userTurn(command: command, context: context))]
+        run.messages =
+            memory.messages + [.user(Self.userTurn(command: command, context: context, fullControl: configuration.fullControl))]
         run.taint = memory.taint
 
         let result: AgentRunResult
@@ -99,8 +111,8 @@ public struct AgentLoop: Sendable {
     }
 
     /// The user turn: Voxa's own facts, then what the user said.
-    static func userTurn(command: String, context: RuntimeContext) -> String {
-        context.render() + "\n\n" + command
+    static func userTurn(command: String, context: RuntimeContext, fullControl: Bool = false) -> String {
+        context.render(fullControl: fullControl) + "\n\n" + command
     }
 
     // MARK: The loop
@@ -154,7 +166,10 @@ public struct AgentLoop: Sendable {
 
             case .toolUse:
                 let calls = response.executableToolUses
-                guard !calls.isEmpty else { return finishWithText(run, response) }
+                guard !calls.isEmpty else {
+                    if let result = try await concludeOrContinue(run, response) { return result }
+                    continue
+                }
 
                 run.messages.append(LLMMessage(role: .assistant, content: response.contentForHistory))
                 let batch = try await runCalls(calls, malformed: response.malformedToolInputs, run: run)
@@ -173,7 +188,7 @@ public struct AgentLoop: Sendable {
                 }
 
             case .endTurn, .stopSequence, nil:
-                return finishWithText(run, response)
+                if let result = try await concludeOrContinue(run, response) { return result }
             }
         }
 
@@ -181,18 +196,21 @@ public struct AgentLoop: Sendable {
         return finish(run, .limitReached(steps: run.configuration.maxSteps), reply, assistantText: reply)
     }
 
-    private func finishWithText(_ run: Run, _ response: LLMResponse) -> AgentRunResult {
+    func finishWithText(_ run: Run, _ response: LLMResponse) -> AgentRunResult {
         var reply = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if reply.isEmpty { reply = run.actions.isEmpty ? L10n.Agent.noReply : L10n.Agent.done }
+        run.messages.append(LLMMessage(role: .assistant, content: Self.closingContent(response, reply: reply)))
+        return finish(run, .completed, reply)
+    }
 
-        // This turn is final, so any tool call in it will never be answered, and a history that holds a call without its
-        // result is rejected by the API on the next command. Keep the words and the reasoning, drop the calls.
-        var content = response.contentForHistory.filter { block in
+    /// What of a turn that ends the model's work goes into the history. That turn will never get its tool calls answered, and a
+    /// history that holds a call without its result is rejected by the API on the next request. Keep the words and the
+    /// reasoning, drop the calls.
+    static func closingContent(_ response: LLMResponse, reply: String) -> [ContentBlock] {
+        let content = response.contentForHistory.filter { block in
             if case .toolUse = block { false } else { true }
         }
-        if content.isEmpty { content = [.text(reply)] }
-        run.messages.append(LLMMessage(role: .assistant, content: content))
-        return finish(run, .completed, reply)
+        return content.isEmpty ? [.text(reply)] : content
     }
 
     /// Builds the result. `assistantText` closes the history with a plain assistant turn where the model didn't write one.

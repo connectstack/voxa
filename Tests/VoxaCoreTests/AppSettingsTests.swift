@@ -35,6 +35,44 @@ struct AppSettingsTests {
         #expect(try decode(#"{"maxAgentSteps": 0}"#).maxAgentSteps == 1)
     }
 
+    @Test("full control is off by default, and only a plain true turns it on")
+    func fullControl() throws {
+        #expect(AppSettings().fullControl == false)
+        #expect(try decode("{}").fullControl == false)
+        #expect(try decode(#"{"fullControl": true}"#).fullControl)
+        #expect(try decode(#"{"fullControl": false}"#).fullControl == false)
+        // Settings saved before it existed, and values that make no sense, all leave confirmations on.
+        #expect(try decode(#"{"model":"claude-opus-5-5"}"#).fullControl == false)
+        for garbled in [#""yes""#, "1", "null", "[true]", #"{"on":true}"#, #""true""#] {
+            #expect(try decode(#"{"fullControl": \#(garbled), "model": "claude-opus-5-5"}"#).fullControl == false, "\(garbled)")
+        }
+        // A bad value doesn't take the other settings with it.
+        #expect(try decode(#"{"fullControl": "yes", "model": "claude-opus-5-5"}"#).model == "claude-opus-5-5")
+    }
+
+    @Test("the completion check is on by default, and a bad value leaves it on")
+    func verifyCompletion() throws {
+        #expect(AppSettings().verifyCompletion)
+        #expect(try decode("{}").verifyCompletion)
+        #expect(try decode(#"{"verifyCompletion": false}"#).verifyCompletion == false)
+        #expect(try decode(#"{"verifyCompletion": true}"#).verifyCompletion)
+        for garbled in [#""no""#, "0", "null", "[false]"] {
+            #expect(try decode(#"{"verifyCompletion": \#(garbled)}"#).verifyCompletion, "\(garbled)")
+        }
+        let off = AppSettings(verifyCompletion: false)
+        let again = try JSONDecoder().decode(AppSettings.self, from: try JSONEncoder().encode(off))
+        #expect(again.verifyCompletion == false)
+    }
+
+    @Test("full control survives being saved and loaded, and turning it off does too")
+    func fullControlRoundTrip() throws {
+        var settings = AppSettings(fullControl: true)
+        let saved = try JSONEncoder().encode(settings)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: saved).fullControl)
+        settings.fullControl = false
+        #expect(try JSONDecoder().decode(AppSettings.self, from: try JSONEncoder().encode(settings)).fullControl == false)
+    }
+
     @Test("settings saved before other providers existed still load, and default to Claude")
     func olderSettingsKeepWorking() throws {
         let saved = try decode(#"{"model":"claude-opus-5-5","effort":"high","localeIdentifier":"en_GB"}"#)

@@ -105,12 +105,30 @@ struct AuditViewerModelTests {
             AuditEntry(runID: run, kind: .permission, tool: "calendar_list_events", outcome: "denied"),
             AuditEntry(runID: run, kind: .reply, outcome: "completed", detail: "Done."),
             AuditEntry(runID: run, kind: .failure, outcome: "failed", detail: "Ollama isn't running"),
+            AuditEntry(
+                runID: run,
+                kind: .policyDecision,
+                tool: "file_trash",
+                outcome: "auto",
+                detail: "This kind of action always needs your OK."
+            ),
+            AuditEntry(runID: run, kind: .completionCheck, outcome: "done"),
+            AuditEntry(runID: run, kind: .completionCheck, outcome: "notDone", detail: "click the video to play it"),
+            AuditEntry(runID: run, kind: .completionCheck, outcome: "unavailable"),
         ]
         let lines = samples.map(L10n.HistoryUI.describe)
         #expect(lines.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
         #expect(Set(lines).count == lines.count, "each says something different")
         #expect(lines[1] == "Asked to use “Open apps”", "tools are named the way the Tools tab names them")
         #expect(lines[5].contains("not allowed"))
+        let lastFour = Array(lines.suffix(4))
+        #expect(
+            lastFour[0] == "“Move files to the Trash” ran without asking (full control)",
+            "a call that full control let through says so, rather than reading like a confirmed one"
+        )
+        #expect(lastFour[1] == "Checked that it was finished: yes")
+        #expect(lastFour[2] == "Checked that it was finished: not yet (click the video to play it)")
+        #expect(lastFour[3] == "Couldn't check whether it was finished")
     }
 
     @Test("every way a command can end has a label")

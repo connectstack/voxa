@@ -59,10 +59,13 @@ extension AgentLoop {
 
     /// The policy's verdict on a call that is well formed, then asking the user or running it.
     func review(_ tool: any AgentTool, _ assessment: ToolAssessment, call: Call, run: Run) async throws -> Handled {
+        // Full control was on when the command started; it stays on only while the user hasn't switched it off since.
+        let fullControl = run.configuration.fullControl ? await fullControlStillOn() : false
         let engine = PolicyEngine(
             configuration: PolicyConfiguration(
                 strictness: run.configuration.strictness,
-                disabledTools: run.configuration.disabledTools
+                disabledTools: run.configuration.disabledTools,
+                fullControl: fullControl
             )
         )
         let risk = PolicyEngine.effectiveRisk(toolName: call.name, baselineRisk: tool.baselineRisk, assessment: assessment)
@@ -90,6 +93,16 @@ extension AgentLoop {
             if let refusal = try await askUser(prompt, for: call, run: run) { return refusal }
             // Esc pressed as the user approved: the approval must not start anything.
             try Task.checkCancellation()
+        case .allowByFullControl(_, let wouldAsk):
+            // Nobody is asked, so the trail says what would have been asked: the History tab shows it ran on the user's say-so.
+            await record(
+                run,
+                .policyDecision,
+                tool: call.name,
+                risk: risk,
+                outcome: "auto",
+                detail: wouldAsk.joined(separator: " | ")
+            )
         case .allow:
             await record(run, .policyDecision, tool: call.name, risk: risk, outcome: "allow")
         case .allowWithNotice:
@@ -251,6 +264,13 @@ extension AgentLoop {
     ) async -> Handled {
         run.taint.absorb(result)
         if !result.isError { run.actions.append(assessment.title) }
+        run.trace.append(
+            Run.Step(
+                title: assessment.title,
+                succeeded: !result.isError,
+                mayLeaveTaskUnfinished: registry.tool(named: call.name)?.mayLeaveTaskUnfinished ?? false
+            )
+        )
         run.emit(.finishedTool(title: assessment.title, succeeded: !result.isError, notice: result.notice))
         await record(
             run,

@@ -102,6 +102,22 @@ public struct UISnapshot: Sendable, Equatable {
     }
 }
 
+/// The web browsers Voxa knows by name. A browser draws the page itself, and most of them show a window's Accessibility tree
+/// little or nothing of it until their own accessibility is switched on, so a listing of one is mostly its toolbar.
+enum Browsers {
+    private static let bundleIDs: Set<String> = [
+        "com.apple.safari", "com.apple.safaritechnologypreview", "com.google.chrome", "com.google.chrome.beta",
+        "com.google.chrome.dev", "com.google.chrome.canary", "com.brave.browser", "com.brave.browser.beta",
+        "com.brave.browser.nightly", "org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "com.microsoft.edgemac",
+        "company.thebrowser.browser", "com.vivaldi.vivaldi", "com.operasoftware.opera", "org.chromium.chromium",
+        "com.duckduckgo.macos.browser", "app.zen-browser.zen",
+    ]
+
+    static func isBrowser(bundleID: String?) -> Bool {
+        bundleID.map { bundleIDs.contains($0.lowercased()) } ?? false
+    }
+}
+
 extension UISnapshot {
     static let maxValueCharacters = 200
 
@@ -117,6 +133,13 @@ extension UISnapshot {
         } else {
             lines.append("Elements (use the ref with ui_click or ui_type; refs only work until the next ui_inspect):")
             lines += elements.map(Self.line)
+            // A page with anything on it has links. A browser listing without one is a listing of the toolbar only.
+            if area == .window, Browsers.isBrowser(bundleID: app.bundleID), !elements.contains(where: { $0.role == "link" }) {
+                lines.append(
+                    "This is a web browser and the page itself isn't listed: browsers show little of a page here. "
+                        + "To see or click something on the page, take a screenshot."
+                )
+            }
         }
         if !texts.isEmpty {
             lines.append("Text shown:")
