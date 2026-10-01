@@ -7,8 +7,8 @@ import VoxaHUD
 import VoxaTestSupport
 
 @MainActor
-@Suite("VoiceSessionController as the host of typed, spoken and Siri commands")
-struct VoiceSessionHandsFreeTests {
+@Suite("VoiceSessionController as the host of typed and Siri commands")
+struct VoiceSessionCommandTests {
     private func harness(_ script: FakeAgent.Script = FakeAgent.Script()) -> (SessionHarness, FakeAgent) {
         let agent = FakeAgent(script)
         return (SessionHarness(agent: agent), agent)
@@ -16,20 +16,20 @@ struct VoiceSessionHandsFreeTests {
 
     // MARK: Whether Voxa is free
 
-    @Test("an idle session is ready for hands-free")
+    @Test("an idle session is ready for a command")
     func idle() {
         let (harness, _) = harness()
-        #expect(harness.controller.handsFreeAvailability == .ready)
+        #expect(harness.controller.availability == .ready)
     }
 
-    @Test("while the shortcut is held, or its audio is being turned into a command, the microphone is the shortcut's")
-    func pushToTalk() async {
+    @Test("while the shortcut is held, or its audio is being turned into a command, the microphone is the person's")
+    func microphoneIsTheirs() async {
         let (harness, _) = harness(.init(holds: true))
         #expect(await harness.pressAndListen())
-        #expect(harness.controller.handsFreeAvailability == .pushToTalk)
+        #expect(harness.controller.availability == .listening)
         await harness.holdLongEnough()
         harness.hotkeys.release()
-        #expect(harness.controller.handsFreeAvailability == .pushToTalk)
+        #expect(harness.controller.availability == .listening)
     }
 
     @Test("while a command is being carried out Voxa is working, and afterwards it is ready again")
@@ -37,23 +37,23 @@ struct VoiceSessionHandsFreeTests {
         let (harness, agent) = harness(.init(holds: true))
         await harness.speakAndRelease()
         #expect(await waitUntil { agent.commands.count == 1 })
-        #expect(harness.controller.handsFreeAvailability == .working)
+        #expect(harness.controller.availability == .working)
         agent.release()
-        #expect(await waitUntil { harness.controller.handsFreeAvailability != .working })
+        #expect(await waitUntil { harness.controller.availability != .working })
     }
 
     @Test("while Voxa is speaking, its microphone would hear it")
     func speaking() {
         let (harness, _) = harness()
         harness.speaker.speak("Opened Safari.", options: .init())
-        #expect(harness.controller.handsFreeAvailability == .speaking)
+        #expect(harness.controller.availability == .speaking)
         harness.speaker.finish()
-        #expect(harness.controller.handsFreeAvailability == .ready)
+        #expect(harness.controller.availability == .ready)
     }
 
     // MARK: A command from the room
 
-    @Test("a hands-free command goes to the agent exactly as a held one does, and the reply is shown and spoken")
+    @Test("a command given without the key goes to the agent exactly as a held one does, and the reply is shown and spoken")
     func submit() async {
         let (harness, agent) = harness(.init(result: AgentRunResult(outcome: .completed, reply: "Opened Safari.")))
         #expect(harness.controller.submitCommand("open Safari"))
@@ -65,11 +65,11 @@ struct VoiceSessionHandsFreeTests {
         #expect(agent.nows == [Date(timeIntervalSince1970: 1_800_000_000)])
     }
 
-    @Test("it is busy the moment a command is taken, so the listener lets go of the microphone at once")
+    @Test("it is busy the moment a command is taken")
     func busyAtOnce() {
         let (harness, _) = harness(.init(holds: true))
         #expect(harness.controller.submitCommand("open Safari"))
-        #expect(harness.controller.handsFreeAvailability == .working)
+        #expect(harness.controller.availability == .working)
     }
 
     @Test("a second command is not taken while the first is running")
@@ -127,14 +127,14 @@ struct VoiceSessionHandsFreeTests {
         #expect(started == 1)
     }
 
-    @Test("Esc cancels a hands-free command, like any other")
+    @Test("Esc cancels a command that was given without the key, like any other")
     func escapeCancels() async {
         let (harness, agent) = harness(.init(holds: true))
         #expect(harness.controller.submitCommand("open Safari"))
         #expect(await waitUntil { agent.commands.count == 1 })
         harness.hotkeys.pressEscape()
         #expect(await waitUntil { agent.wasCancelled })
-        #expect(await waitUntil { harness.controller.handsFreeAvailability == .ready })
+        #expect(await waitUntil { harness.controller.availability == .ready })
     }
 
     @Test("an error left on screen is cleared by the next command")

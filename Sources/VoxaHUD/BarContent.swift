@@ -11,7 +11,7 @@ struct BarContent: View {
     /// Whether there is anything to show below the field. (A bar with nothing to say is only the field.)
     static func hasContent(input: CommandBarModel, content: HUDModel) -> Bool {
         switch content.mode {
-        case .idle: input.listening.isListening || !input.lines.isEmpty
+        case .idle: !input.lines.isEmpty
         // The title is in the row when nothing was heard, and then only the rest is below.
         case .notice(_, let detail): content.headline == nil || detail != nil
         case .error(let error): content.headline == nil || !error.detail.isEmpty || error.recovery != nil
@@ -53,7 +53,7 @@ struct BarContent: View {
             StatusRow(title: L10n.HUD.preparing) { CancelHint() }
         case .listening:
             LiveWaveform(content: content).frame(height: 30)
-            StatusRow(title: L10n.HUD.listening, subtitle: content.hotkeyHint.map(L10n.HUD.releaseToSend)) { CancelHint() }
+            StatusRow(title: L10n.HUD.listening, subtitle: listeningHint) { CancelHint() }
         case .transcribing:
             StatusRow(title: L10n.HUD.transcribing) { CancelHint() }
         case .result:
@@ -73,12 +73,15 @@ struct BarContent: View {
         }
     }
 
-    /// Waiting with the bar open: a live level while the microphone listens, and what to know about it.
+    /// What to do to send what is being said: click the microphone again, when its button started it; let go of the key, when one is
+    /// held.
+    private var listeningHint: String? {
+        content.endsOnClick ? L10n.HUD.clickToSend : content.hotkeyHint.map(L10n.HUD.releaseToSend)
+    }
+
+    /// Waiting with the bar open: what there is to know (why something didn't happen, what full control changes).
     @ViewBuilder
     private var idle: some View {
-        if input.listening.isListening {
-            LiveWaveform(content: content).frame(height: 24)
-        }
         let lines = input.lines
         if !lines.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
@@ -197,7 +200,6 @@ struct CaptionLine: View {
         switch line.tone {
         case .plain: "info.circle"
         case .warning: "exclamationmark.triangle.fill"
-        case .problem: "mic.slash.fill"
         }
     }
 
@@ -205,7 +207,6 @@ struct CaptionLine: View {
         switch line.tone {
         case .plain: .secondary
         case .warning: BarPalette.orange
-        case .problem: BarPalette.red
         }
     }
 }

@@ -23,7 +23,7 @@ extension L10n {
             String(localized: "It asks first before anything that can't be undone, and you can say yes or no out loud.", comment: "Welcome step")
         }
         public static var welcomePrivate: String {
-            String(localized: "Your voice is turned into text on this Mac and never leaves it. The model you choose gets the words of your command, and whatever Voxa has to read to carry it out, such as a calendar entry or what is in a window.", comment: "Welcome step")
+            String(localized: "Your voice is turned into text on this Mac and never leaves it, unless you choose Apple online recognition in Settings. The model you choose gets the words of your command, and whatever Voxa has to read to carry it out, such as a calendar entry or what is in a window.", comment: "Welcome step")
         }
 
         // MARK: Permissions

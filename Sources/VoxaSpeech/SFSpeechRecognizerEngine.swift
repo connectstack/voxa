@@ -4,14 +4,22 @@ import VoxaCore
 
 /// Speech recognition with `SFSpeechRecognizer`, available on every supported macOS version.
 ///
-/// Privacy: recognition is forced on-device. If the language has no on-device model, the engine fails with a
-/// message explaining how to install one instead of silently sending the user's voice to Apple's servers. Server
-/// recognition can only be enabled explicitly with `allowServerRecognition`.
+/// Privacy: recognition is on-device unless the user chose online recognition. If the language has no on-device model, the engine
+/// fails with a message explaining how to install one instead of silently sending the user's voice to Apple's servers.
 public struct SFSpeechRecognizerEngine: SpeechRecognizer {
-    private let allowServerRecognition: Bool
+    /// Where the audio is recognized.
+    public enum Recognition: Sendable, Equatable {
+        /// On this Mac only.
+        case onDevice
+        /// On Apple's servers, as Siri and Dictation are: more accurate, especially for names and accents, and the voice is sent to
+        /// Apple while it is spoken. Only ever the user's choice.
+        case online
+    }
 
-    public init(allowServerRecognition: Bool = false) {
-        self.allowServerRecognition = allowServerRecognition
+    private let recognition: Recognition
+
+    public init(recognition: Recognition = .onDevice) {
+        self.recognition = recognition
     }
 
     public func requiredPermissions(locale: Locale) async -> Set<PermissionKind> {
@@ -22,7 +30,7 @@ public struct SFSpeechRecognizerEngine: SpeechRecognizer {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
             throw SpeechError.unsupportedLocale(locale.identifier)
         }
-        guard recognizer.supportsOnDeviceRecognition || allowServerRecognition else {
+        guard recognizer.supportsOnDeviceRecognition || recognition == .online else {
             throw SpeechError.onDeviceUnavailable(languageName: locale.voxaDisplayName)
         }
     }
@@ -31,7 +39,7 @@ public struct SFSpeechRecognizerEngine: SpeechRecognizer {
         _ audio: AsyncThrowingStream<AudioChunk, any Error>,
         locale: Locale
     ) -> AsyncThrowingStream<Transcript, any Error> {
-        let allowServer = allowServerRecognition
+        let recognition = recognition
         return AsyncThrowingStream { continuation in
             let status = SFSpeechRecognizer.authorizationStatus()
             guard status == .authorized else {
@@ -46,14 +54,14 @@ public struct SFSpeechRecognizerEngine: SpeechRecognizer {
                 continuation.finish(throwing: SpeechError.recognizerUnavailable)
                 return
             }
-            guard recognizer.supportsOnDeviceRecognition || allowServer else {
+            guard recognizer.supportsOnDeviceRecognition || recognition == .online else {
                 continuation.finish(throwing: SpeechError.onDeviceUnavailable(languageName: locale.voxaDisplayName))
                 return
             }
 
             let session = SFSpeechSession(
                 recognizer: recognizer,
-                onDevice: recognizer.supportsOnDeviceRecognition,
+                onDevice: recognition == .onDevice,
                 continuation: continuation
             )
             session.start()
@@ -106,7 +114,7 @@ enum SFSpeechErrorClassification: Equatable {
 
 /// Owns one `SFSpeechRecognitionTask`. The Speech framework's types aren't `Sendable`, so they are confined to this
 /// class and every access goes through `lock`; results arrive on a private serial queue (never the main queue).
-private final class SFSpeechSession: @unchecked Sendable {
+final class SFSpeechSession: @unchecked Sendable {
     private let request = SFSpeechAudioBufferRecognitionRequest()
     private let recognizer: SFSpeechRecognizer
     private let continuation: AsyncThrowingStream<Transcript, any Error>.Continuation
@@ -129,6 +137,11 @@ private final class SFSpeechSession: @unchecked Sendable {
         queue.qualityOfService = .userInitiated
         recognizer.queue = queue
 
+        Self.configure(request, onDevice: onDevice)
+    }
+
+    /// How a request is set up. `onDevice` is what keeps the voice on this Mac: without it the request may go to Apple's servers.
+    static func configure(_ request: SFSpeechAudioBufferRecognitionRequest, onDevice: Bool) {
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = onDevice
         request.taskHint = .dictation

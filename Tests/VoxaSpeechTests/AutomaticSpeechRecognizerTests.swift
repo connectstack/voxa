@@ -172,6 +172,14 @@ struct RecognizerProviderTests {
         #expect(recognizer is SFSpeechRecognizerEngine)
     }
 
+    @Test("the online setting yields the online engine, and nothing else asks for Apple's servers")
+    func online() {
+        let recognizer = DefaultSpeechRecognizerProvider().recognizer(for: AppSettings(speechEngine: .appleOnline))
+        #expect(recognizer is OnlineSpeechRecognizer)
+        #expect(!(DefaultSpeechRecognizerProvider().recognizer(for: AppSettings(speechEngine: .appleClassic)) is OnlineSpeechRecognizer))
+        #expect(!(DefaultSpeechRecognizerProvider().recognizer(for: AppSettings(speechEngine: .appleAutomatic)) is OnlineSpeechRecognizer))
+    }
+
     @Test("the automatic setting yields the selecting engine on macOS 26 and classic before it")
     func automatic() {
         let recognizer = DefaultSpeechRecognizerProvider().recognizer(for: AppSettings(speechEngine: .appleAutomatic))

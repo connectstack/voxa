@@ -74,6 +74,9 @@ public final class HUDModel {
     public var mode: HUDMode = .idle
     public var transcript = ""
     public var isTranscriptFinal = false
+    /// Whether the microphone button's click has Voxa listening (no key is held), so that the command is sent by clicking it again:
+    /// the hint under "Listening…" says so instead of telling them which key to release.
+    public var endsOnClick = false
     /// The push-to-talk shortcut, e.g. "⌥Space", shown in hints.
     public var hotkeyHint: String?
     /// Whether the keyboard (Return) can answer the current confirmation yet. Off for a moment after a prompt appears, so
@@ -87,7 +90,7 @@ public final class HUDModel {
     @ObservationIgnored public var onConfirmationChoice: ((ConfirmationChoice) -> Void)?
 
     /// The least time between two bars of the meter, in seconds. The microphone reports its level about 45 times a second, and drawing
-    /// the meter that often is most of what the bar costs while it listens (which, for continuous listening, can be a long time).
+    /// the meter that often is most of what the bar costs while it listens.
     @ObservationIgnored private let levelInterval: TimeInterval
     @ObservationIgnored private let uptime: () -> TimeInterval
     @ObservationIgnored private var lastBarAt = -TimeInterval.infinity
@@ -127,6 +130,7 @@ public final class HUDModel {
     public func resetSession() {
         transcript = ""
         isTranscriptFinal = false
+        endsOnClick = false
         confirmationKeysEnabled = false
         answerStatus = .idle
         levels = [Float](repeating: 0, count: Self.barCount)
@@ -151,6 +155,9 @@ public protocol HUDPresenting: AnyObject {
     func push(level: AudioLevel)
     /// Turns the keyboard answer for the current confirmation on or off (it is off during the input guard).
     func setConfirmationKeysEnabled(_ enabled: Bool)
+    /// Says that the microphone button's click has Voxa listening, so the command is sent by clicking it again, rather than by
+    /// letting go of a key. Cleared when a new command begins.
+    func setListeningEndsOnClick(_ endsOnClick: Bool)
     /// Shows the progress of a spoken answer to the current confirmation.
     func setAnswerStatus(_ status: AnswerStatus)
     /// Hides the HUD, immediately or after `delay`. Any later `show` cancels a pending hide.
@@ -166,3 +173,8 @@ extension HUDModel {
     }
 }
 #endif
+
+extension HUDPresenting {
+    /// Most presenters have nothing to show for it.
+    public func setListeningEndsOnClick(_ endsOnClick: Bool) {}
+}

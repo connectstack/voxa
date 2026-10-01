@@ -1,3 +1,4 @@
+import AppKit
 import KeyboardShortcuts
 import SwiftUI
 import VoxaCore
@@ -12,16 +13,19 @@ struct GeneralSettingsView: View {
     @State private var languages: [SpeechLanguage] = []
     @State private var voices: [VoiceInfo] = []
     @State private var login: LaunchAtLoginModel
+    @State private var siriSetup: SiriSetup
 
     init(store: SettingsStore, services: SettingsServices) {
         self.store = store
         self.services = services
         _login = State(initialValue: LaunchAtLoginModel(control: services.launchAtLogin))
+        _siriSetup = State(initialValue: services.siri.setup())
     }
 
     var body: some View {
         Form {
             shortcutSection
+            siriSection
             barSection
             speechSection
             voiceSection
@@ -35,6 +39,11 @@ struct GeneralSettingsView: View {
         .onAppear {
             voices = VoiceCatalog.sorted(services.voice.voices(), for: store.current.localeIdentifier)
             login.refresh()
+            siriSetup = services.siri.setup()
+        }
+        // Siri is switched on in System Settings: what it says here follows when the person comes back.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            siriSetup = services.siri.setup()
         }
     }
 
@@ -51,27 +60,34 @@ struct GeneralSettingsView: View {
         }
     }
 
+    private var siriSection: some View {
+        Section(L10n.Siri.section) {
+            Text(L10n.Siri.help).font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                Image(systemName: siriIsReady ? "checkmark.circle.fill" : "info.circle")
+                    .foregroundStyle(siriIsReady ? Color.green : Color.orange)
+                    .accessibilityHidden(true)
+                Text(siriStatus).font(.caption)
+                Spacer()
+                Button(L10n.Siri.openSettings) { services.siri.openSettings() }
+            }
+        }
+    }
+
+    private var siriIsReady: Bool { siriSetup.isEnabled && siriSetup.listensForHeySiri }
+
+    private var siriStatus: String {
+        if !siriSetup.isEnabled { return L10n.Siri.siriOff }
+        return siriSetup.listensForHeySiri ? L10n.Siri.heySiriOn : L10n.Siri.heySiriOff
+    }
+
     private var barSection: some View {
         Section(L10n.Bar.section) {
             KeyboardShortcuts.Recorder(for: .openBar) {
                 Text(L10n.Bar.shortcut)
             }
             Text(L10n.Bar.shortcutHelp).font(.caption).foregroundStyle(.secondary)
-            Picker(L10n.Bar.idle, selection: $store.current.listeningIdleMinutes) {
-                ForEach(idleChoices, id: \.self) { minutes in
-                    Text(minutes == 0 ? L10n.Bar.idleNever : L10n.Bar.idleMinutes(minutes)).tag(minutes)
-                }
-            }
-            Text(L10n.Bar.idleHelp).font(.caption).foregroundStyle(.secondary)
         }
-    }
-
-    /// How long a microphone left on may go with nothing said, with the current value if it isn't one of the usual ones.
-    private var idleChoices: [Int] {
-        var choices = [0, 5, 10, 30, 60]
-        let current = store.current.listeningIdleMinutes
-        if !choices.contains(current) { choices.append(current) }
-        return choices.sorted()
     }
 
     private var speechSection: some View {
@@ -79,6 +95,7 @@ struct GeneralSettingsView: View {
             Picker(L10n.Settings.speechEngine, selection: $store.current.speechEngine) {
                 Text(L10n.Settings.engineAutomatic).tag(SpeechEngineKind.appleAutomatic)
                 Text(L10n.Settings.engineClassic).tag(SpeechEngineKind.appleClassic)
+                Text(L10n.Settings.engineOnline).tag(SpeechEngineKind.appleOnline)
             }
             Picker(L10n.Settings.language, selection: $store.current.localeIdentifier) {
                 ForEach(languageChoices) { language in
@@ -89,7 +106,7 @@ struct GeneralSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle(L10n.Settings.downloadModel, isOn: $store.current.downloadSpeechModel)
-                .disabled(store.current.speechEngine != .appleAutomatic)
+                .disabled(store.current.speechEngine == .appleClassic)
             Text(L10n.Settings.downloadModelHelp)
                 .font(.caption)
                 .foregroundStyle(.secondary)

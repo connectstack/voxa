@@ -22,7 +22,7 @@ extension L10n {
             case .microphone:
                 String(localized: "Hears your commands, only while you hold the shortcut.", comment: "What the Microphone permission is for")
             case .speechRecognition:
-                String(localized: "Turns your voice into text on this Mac, never on a server.", comment: "What the Speech Recognition permission is for")
+                String(localized: "Turns your voice into text: on this Mac, unless you choose Apple online recognition in Settings.", comment: "What the Speech Recognition permission is for")
             case .accessibility:
                 String(localized: "Lets Voxa see what is in front, and press buttons and type in other apps when you ask.", comment: "What the Accessibility permission is for")
             case .screenRecording:

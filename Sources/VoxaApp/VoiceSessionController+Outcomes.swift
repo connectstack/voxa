@@ -21,12 +21,7 @@ extension VoiceSessionController {
         }
 
         guard !text.isEmpty else {
-            hud.show(
-                .notice(
-                    title: L10n.HUD.didntCatch,
-                    detail: hotkeys.pushToTalkDescription.map(L10n.HUD.didntCatchDetail)
-                )
-            )
+            hud.show(.notice(title: L10n.HUD.didntCatch, detail: didntCatchDetail(for: run)))
             hud.hide(after: configuration.noticeDisplay)
             armDismiss(for: configuration.noticeDisplay)
             return
@@ -44,6 +39,11 @@ extension VoiceSessionController {
         hud.show(.result(text))
         hud.hide(after: configuration.resultDisplay)
         armDismiss(for: configuration.resultDisplay)
+    }
+
+    /// How to try again, said the way this try was made: with the key, or with the microphone button.
+    private func didntCatchDetail(for run: Run) -> String? {
+        run.trigger == .click ? L10n.HUD.didntCatchClickDetail : hotkeys.pushToTalkDescription.map(L10n.HUD.didntCatchDetail)
     }
 
     func fail(_ run: Run, with error: UserFacingError) {
@@ -123,7 +123,7 @@ extension VoiceSessionController {
         run.isFinished = true
         run.cancelHelpers()
         let capture = capture
-        Task { await capture.stop() }
+        captureStop = Task { await capture.stop() }
     }
 
     // MARK: Esc while a result is showing

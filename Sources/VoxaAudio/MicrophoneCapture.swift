@@ -69,8 +69,13 @@ public actor MicrophoneCapture: AudioCapturing {
             Task { await self?.handleConfigurationChange() }
         }
 
+        let device = InputDevice.current()
+        let level = device?.volume.map { "\(Int(($0 * 100).rounded()))%" } ?? "n/a"
         Log.audio.info(
-            "capture started (\(Int(hardwareFormat.sampleRate)) Hz, \(hardwareFormat.channelCount) channel(s))"
+            """
+            capture started (\(Int(hardwareFormat.sampleRate)) Hz, \(hardwareFormat.channelCount) channel(s)) on \
+            \(device?.name ?? "an unknown input", privacy: .public), input volume \(level, privacy: .public)
+            """
         )
         return pipeline.streams
     }

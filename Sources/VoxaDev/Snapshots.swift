@@ -26,12 +26,13 @@ struct Snapshot {
     var transcript = ""
     var isFinal = false
     var text = ""
-    var listening: HandsFreeState = .off
     var note: String?
     var warning: String?
     /// How loud the microphone is, 0 to 1, or nil for silence.
     var level: Float?
     var keysEnabled = true
+    /// Whether the microphone button's click has Voxa listening, so that a click on it sends what was said.
+    var endsOnClick = false
 }
 
 /// Words and problems the pictures share.
@@ -44,7 +45,7 @@ private enum SampleText {
 }
 
 @MainActor func barSnapshotList() -> [Snapshot] {
-    waitingSnapshots() + talkingSnapshots() + commandSnapshots() + questionSnapshots()
+    waitingSnapshots() + clickSnapshots() + talkingSnapshots() + commandSnapshots() + questionSnapshots()
 }
 
 /// The bar open, waiting.
@@ -52,12 +53,25 @@ private enum SampleText {
     [
         Snapshot(name: "idle"),
         Snapshot(name: "typing", text: "open Safari and search for Swift concurrency"),
-        Snapshot(name: "listening", listening: .listening, level: 0.5),
-        Snapshot(name: "listening-quiet", listening: .listening),
-        Snapshot(name: "listening-fullcontrol", listening: .listening, warning: L10n.Bar.fullControlWarning, level: 0.35),
+        Snapshot(name: "fullcontrol", warning: L10n.Bar.fullControlWarning),
         Snapshot(name: "busy", text: "open Notes", note: L10n.Bar.busyNote),
-        Snapshot(name: "stopped", note: L10n.Bar.stoppedIdle(10)),
-        Snapshot(name: "unavailable", listening: .unavailable(SampleText.micError)),
+    ]
+}
+
+/// The bar open, and the microphone button clicked: it listens until it is clicked again.
+@MainActor private func clickSnapshots() -> [Snapshot] {
+    let stretch = SampleText.stretch
+    return [
+        Snapshot(name: "click-preparing", mode: .preparing, endsOnClick: true),
+        Snapshot(name: "click-listening", mode: .listening, level: 0.45, endsOnClick: true),
+        Snapshot(name: "click-partial", mode: .listening, transcript: stretch, level: 0.55, endsOnClick: true),
+        Snapshot(name: "click-long", mode: .listening, transcript: SampleText.longCommand, level: 0.55, endsOnClick: true),
+        Snapshot(name: "click-transcribing", mode: .transcribing, transcript: stretch, isFinal: true),
+        Snapshot(
+            name: "click-notice",
+            mode: .notice(title: L10n.HUD.didntCatch, detail: L10n.HUD.didntCatchClickDetail)
+        ),
+        Snapshot(name: "click-error", mode: .error(SampleText.micError)),
     ]
 }
 
@@ -113,9 +127,8 @@ private enum SampleText {
     ]
 }
 
-/// A question, and with the microphone on, where the button stays through all of it.
+/// A question, which nothing but a click, the shortcut chord or the key held can answer.
 @MainActor private func questionSnapshots() -> [Snapshot] {
-    let stretch = SampleText.stretch
     return [
         Snapshot(
             name: "confirm-script",
@@ -128,27 +141,6 @@ private enum SampleText {
         Snapshot(name: "confirm-link", isOpen: false, mode: .confirm(SamplePrompts.link)),
         Snapshot(name: "confirm-taint", isOpen: false, mode: .confirm(SamplePrompts.taint)),
         Snapshot(name: "confirm-long", isOpen: false, mode: .confirm(SamplePrompts.longScript)),
-        Snapshot(
-            name: "mic-thinking",
-            mode: .thinking(partial: nil),
-            transcript: stretch,
-            isFinal: true,
-            listening: .paused(.working)
-        ),
-        Snapshot(
-            name: "mic-reply",
-            mode: .reply("Done. I set a timer for five minutes."),
-            transcript: stretch,
-            isFinal: true,
-            listening: .paused(.speaking)
-        ),
-        Snapshot(
-            name: "mic-confirm",
-            mode: .confirm(SamplePrompts.taint),
-            transcript: "Open Calculator",
-            isFinal: true,
-            listening: .paused(.working)
-        ),
     ]
 }
 
@@ -174,10 +166,10 @@ private enum SampleText {
             let content = HUDModel()
             input.isOpen = snapshot.isOpen
             input.text = snapshot.text
-            input.listening = snapshot.listening
             input.note = snapshot.note
             if let warning = snapshot.warning { input.warning = { warning } }
             content.mode = snapshot.mode
+            content.endsOnClick = snapshot.endsOnClick
             content.transcript = snapshot.transcript
             content.isTranscriptFinal = snapshot.isFinal
             content.hotkeyHint = "⌥Space"

@@ -22,6 +22,8 @@ public struct SettingsServices: Sendable {
     public var tools: [ToolInfo]
     public var audit: any AuditReading
     public var launchAtLogin: any LaunchAtLoginControlling
+    /// How Siri is set up, and a way to its settings: Siri is how Voxa is talked to.
+    public var siri: any SiriInspecting
     /// Opens the welcome and permissions walkthrough.
     public var showWelcome: @MainActor @Sendable () -> Void
 
@@ -35,6 +37,7 @@ public struct SettingsServices: Sendable {
         tools: [ToolInfo],
         audit: any AuditReading,
         launchAtLogin: any LaunchAtLoginControlling,
+        siri: any SiriInspecting = InertSiri(),
         showWelcome: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.keys = keys
@@ -46,6 +49,7 @@ public struct SettingsServices: Sendable {
         self.tools = tools
         self.audit = audit
         self.launchAtLogin = launchAtLogin
+        self.siri = siri
         self.showWelcome = showWelcome
     }
 

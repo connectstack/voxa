@@ -17,6 +17,11 @@ import VoxaSpeech
 /// yes or no instead of a new command; a press while the agent is working otherwise does nothing. Esc cancels the
 /// command at any point.
 ///
+/// The microphone button in the Voxa bar is the same session, started and ended by a click instead of a key: the first click is "key
+/// down" and the next is "key up". From the first click on it is a held key's command in every respect (the same live words, the
+/// same Esc, the same end), so what it hears is what push-to-talk hears. It never listens on its own and never decides when someone
+/// has finished: only a click does.
+///
 /// Everything here runs on the main actor; the microphone and recognizers are the only things that hop off it. There is
 /// at most one active run. Time is only ever consumed through the injected clock, so the tail, the accidental-tap
 /// filter, the recording limit and the finalization watchdog are all deterministic in tests.
@@ -82,6 +87,8 @@ public final class VoiceSessionController {
     @ObservationIgnored public var onCommandStarted: (@MainActor () -> Void)?
 
     @ObservationIgnored var run: Run?
+    /// The microphone being let go of after a run, which the next one must wait for before it opens it again.
+    @ObservationIgnored var captureStop: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored var errorResetTask: Task<Void, Never>?
     /// Keeps Esc bound to "dismiss" while a finished command's result or error is still on screen.
@@ -160,16 +167,57 @@ public final class VoiceSessionController {
 
     /// The push-to-talk key went down.
     public func pressBegan() {
+        begin(by: .key)
+    }
+
+    /// The microphone button in the Voxa bar was clicked. The first click starts a command by voice, the way holding the key does,
+    /// and the next one sends it, the way letting go of the key does. A click while a held key has the microphone, or while a command
+    /// is being carried out or asked about, does nothing: it is never the answer to a question, which is a click on the question's
+    /// own buttons, the shortcut chord, or the key held.
+    public func microphoneClicked() {
+        guard let run, !run.isFinished else {
+            begin(by: .click)
+            return
+        }
+        guard run.trigger == .click, !run.releaseRequested else {
+            Log.session.debug("microphone click ignored: a command is already in progress")
+            return
+        }
+        if phase == .starting {
+            // Nothing has been said yet, so a second click is a change of mind, and there is nothing to send.
+            Log.session.info("microphone clicked again before it was listening; cancelled")
+            cancel()
+        } else if phase == .listening {
+            Log.session.info("microphone clicked to send")
+            run.releaseRequested = true
+            beginStopSequence(run)
+        }
+    }
+
+    /// Whether the microphone button's click has the microphone open, or opening. The Voxa bar stays where it can be seen while it does.
+    public var isMicrophoneOpen: Bool {
+        guard let run, run.trigger == .click, !run.isFinished else { return false }
+        return phase == .starting || phase == .listening
+    }
+
+    /// Lets go of a microphone the button opened, and drops what it heard: the bar was put away, so nothing is sent. A held key's
+    /// command, and a command that is being carried out, are not the bar's to stop.
+    public func cancelMicrophone() {
+        guard let run, run.trigger == .click, !run.isFinished else { return }
+        cancel()
+    }
+
+    private func begin(by trigger: Run.Trigger) {
         // Voxa must not talk over the person, or let its own voice reach the microphone as the next command.
         speaker?.stop()
         if let run, !run.isFinished {
             Log.session.debug("press ignored: a command is already in progress")
             return
         }
-        // While the agent works, a press is only meaningful as the answer to a confirmation.
+        // While the agent works, a press of the key is only meaningful as the answer to a confirmation. A click never is.
         var kind = Run.Kind.command
         if agentTask != nil {
-            guard confirmations?.isAwaitingAnswer == true else {
+            guard trigger == .key, confirmations?.isAwaitingAnswer == true else {
                 Log.session.debug("press ignored: the agent is working")
                 return
             }
@@ -178,28 +226,32 @@ public final class VoiceSessionController {
         errorResetTask?.cancel()
         disarmDismiss()
 
-        let run = Run(kind: kind)
+        let run = Run(kind: kind, trigger: trigger)
         self.run = run
         if kind == .command {
             lastError = nil
             hud.hotkeyHint = hotkeys.pushToTalkDescription
             hud.beginSession()
+            if trigger == .click { hud.setListeningEndsOnClick(true) }
         }
         phase = .starting
 
-        // The hold is measured from the key press, not from when the microphone finishes opening.
-        run.minimumHoldTask = Task { [weak self] in
-            guard let self else { return }
-            try? await clock.sleep(for: configuration.minimumHold)
-            guard !Task.isCancelled else { return }
-            run.minimumHoldElapsed = true
+        // The hold is measured from the key press, not from when the microphone finishes opening. A click has no hold to measure.
+        if trigger == .key {
+            run.minimumHoldTask = Task { [weak self] in
+                guard let self else { return }
+                try? await clock.sleep(for: configuration.minimumHold)
+                guard !Task.isCancelled else { return }
+                run.minimumHoldElapsed = true
+            }
         }
         run.task = Task { [weak self] in await self?.perform(run) }
     }
 
-    /// The push-to-talk key went up.
+    /// The push-to-talk key went up. Only a command that the key started ends with it: a held key's release means nothing to one that a
+    /// click started.
     public func pressEnded() {
-        guard let run, !run.isFinished, !run.releaseRequested else { return }
+        guard let run, !run.isFinished, !run.releaseRequested, run.trigger == .key else { return }
         run.releaseRequested = true
 
         // A tap: answer right away instead of waiting for permissions or the microphone, which may take a moment.
@@ -265,7 +317,8 @@ public final class VoiceSessionController {
             return willPrompt ? announceReady(run) : tapped(run)
         }
 
-        // 2. Open the microphone.
+        // 2. Open the microphone, once the last run has let go of it.
+        await captureStop?.value
         let streams: AudioCaptureStreams
         do {
             streams = try await capture.start()
@@ -383,7 +436,11 @@ final class Run {
     /// A command is recorded to be carried out; an answer is recorded to answer a confirmation.
     enum Kind { case command, answer }
 
+    /// What started it: the held shortcut, or a click on the Voxa bar's microphone button.
+    enum Trigger { case key, click }
+
     let kind: Kind
+    let trigger: Trigger
     var task: Task<Void, Never>?
     var stopTask: Task<Void, Never>?
     var limitTask: Task<Void, Never>?
@@ -397,8 +454,11 @@ final class Run {
 
     var isActive: Bool { !isFinished && !isCancelled }
 
-    init(kind: Kind) {
+    init(kind: Kind, trigger: Trigger = .key) {
         self.kind = kind
+        self.trigger = trigger
+        // A click has no hold to mistake for an accidental tap.
+        if trigger == .click { minimumHoldElapsed = true }
     }
 
     func cancelHelpers() {

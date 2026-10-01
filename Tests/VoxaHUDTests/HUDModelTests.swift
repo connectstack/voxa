@@ -62,12 +62,14 @@ struct HUDModelTests {
         model.hotkeyHint = "⌥Space"
         model.transcript = "open safari"
         model.isTranscriptFinal = true
+        model.endsOnClick = true
         model.push(level: AudioLevel(rms: 0.9, peak: 1))
 
         model.resetSession()
 
         #expect(model.transcript.isEmpty)
         #expect(!model.isTranscriptFinal)
+        #expect(!model.endsOnClick, "how the last command was started says nothing about the next")
         #expect(model.levels.allSatisfy { $0 == 0 })
         #expect(model.hotkeyHint == "⌥Space")
     }

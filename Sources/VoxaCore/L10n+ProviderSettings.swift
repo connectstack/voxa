@@ -44,12 +44,12 @@ extension L10n {
                 SettingsModel.privacy
             case .openAI:
                 String(
-                    localized: "Your voice is turned into text on this Mac and never leaves it. The text of your command, and anything a tool reads for you, is sent to OpenAI to decide what to do; Voxa asks OpenAI not to store the conversation. The key is kept in the macOS Keychain.",
+                    localized: "Your voice is turned into text on this Mac and never leaves it, unless you choose Apple online recognition in Settings. The text of your command, and anything a tool reads for you, is sent to OpenAI to decide what to do; Voxa asks OpenAI not to store the conversation. The key is kept in the macOS Keychain.",
                     comment: "Settings privacy note under the OpenAI API key"
                 )
             case .ollama:
                 String(
-                    localized: "Your voice is turned into text on this Mac and never leaves it. With a model that runs on this Mac, neither does the text of your command. Models marked as cloud models run on Ollama's servers instead.",
+                    localized: "Your voice is turned into text on this Mac and never leaves it, unless you choose Apple online recognition in Settings. With a model that runs on this Mac, the text of your command stays on it too. Models marked as cloud models run on Ollama's servers instead.",
                     comment: "Settings privacy note for Ollama"
                 )
             }

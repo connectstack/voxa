@@ -6,8 +6,6 @@ import VoxaCore
 @MainActor
 @Suite("CommandBarModel")
 struct CommandBarModelTests {
-    private let problem = UserFacingError(title: "Microphone access is off", detail: "Turn it on in System Settings.")
-
     // MARK: Typing
 
     @Test("Return sends what was typed, trimmed, and clears the field")
@@ -57,14 +55,23 @@ struct CommandBarModelTests {
 
     // MARK: The microphone and Esc
 
-    @Test("the microphone button asks the app to switch listening, and clears the last line")
+    @Test("the microphone button asks the app to start or send, and clears the last line")
     func microphone() {
         let model = CommandBarModel()
-        var toggles = 0
-        model.onToggleListening = { toggles += 1 }
-        model.note = "Stopped listening after 10 minutes of silence."
-        model.toggleListening()
-        #expect(toggles == 1 && model.note == nil)
+        var clicks = 0
+        model.onMicrophone = { clicks += 1 }
+        model.note = "Voxa is busy. Press Esc to stop it."
+        model.microphoneClicked()
+        #expect(clicks == 1 && model.note == nil)
+        model.microphoneClicked()
+        #expect(clicks == 2, "each click is the app's to read: the first starts, the next sends")
+    }
+
+    @Test("a click with nobody to hear it does nothing")
+    func microphoneWithoutAnApp() {
+        let model = CommandBarModel()
+        model.microphoneClicked()
+        #expect(model.note == nil)
     }
 
     @Test("Esc asks the app to put the bar away")
@@ -86,70 +93,33 @@ struct CommandBarModelTests {
 
     // MARK: What it says
 
-    @Test("the field says what Voxa is doing while it is empty")
-    func placeholder() {
-        let model = CommandBarModel()
-        let expected: [(HandsFreeState, String)] = [
-            (.off, L10n.Bar.placeholder),
-            (.starting, L10n.Bar.placeholderStarting),
-            (.listening, L10n.Bar.placeholderListening),
-            (.paused(.working), L10n.Bar.placeholderWorking),
-            (.paused(.pushToTalk), L10n.Bar.placeholderWorking),
-            (.paused(.speaking), L10n.Bar.placeholderSpeaking),
-            (.unavailable(problem), problem.title),
-        ]
-        for (state, text) in expected {
-            model.listening = state
-            #expect(model.placeholder == text, "\(state)")
-        }
+    @Test("with nothing to say there is nothing under the field")
+    func noLines() {
+        #expect(CommandBarModel().lines.isEmpty)
     }
 
-    @Test("with the microphone off there is nothing under the field")
-    func noLinesWhenOff() {
+    @Test("the lines under the field are why something didn't happen, then the warning about full control")
+    func lines() {
         let model = CommandBarModel()
-        model.warning = { "Full control is on" }
-        #expect(model.lines.isEmpty, "the warning is about listening, so it waits for listening")
-    }
-
-    @Test("while listening the bar says what listening means, and warns about full control")
-    func listeningLines() {
-        let model = CommandBarModel()
-        model.listening = .listening
-        #expect(model.lines == [CommandBarModel.Line(text: L10n.Bar.listeningNote, tone: .plain)])
-
         model.warning = { L10n.Bar.fullControlWarning }
-        #expect(model.lines.last == CommandBarModel.Line(text: L10n.Bar.fullControlWarning, tone: .warning))
+        #expect(model.lines == [CommandBarModel.Line(text: L10n.Bar.fullControlWarning, tone: .warning)])
+
+        model.note = "Voxa is busy."
+        #expect(model.lines.map(\.text) == ["Voxa is busy.", L10n.Bar.fullControlWarning], "what stopped it comes first")
+
         model.warning = { nil }
-        #expect(model.lines.count == 1)
-    }
-
-    @Test("a microphone that can't be had says why, in red, and doesn't go on to describe listening")
-    func unavailableLines() {
-        let model = CommandBarModel()
-        model.warning = { L10n.Bar.fullControlWarning }
-        model.listening = .unavailable(problem)
-        #expect(model.lines == [CommandBarModel.Line(text: problem.detail, tone: .problem)])
-    }
-
-    @Test("what stopped it comes first")
-    func noteFirst() {
-        let model = CommandBarModel()
-        model.listening = .listening
-        model.note = "Stopped."
-        #expect(model.lines.first?.text == "Stopped.")
+        #expect(model.lines == [CommandBarModel.Line(text: "Voxa is busy.", tone: .plain)])
     }
 
     // MARK: Putting away
 
-    @Test("putting the bar away forgets what was typed and the line, but not whether it is listening")
+    @Test("putting the bar away forgets what was typed and the line")
     func reset() {
         let model = CommandBarModel()
         model.text = "open Safari"
         model.note = "Voxa is busy."
-        model.listening = .listening
         model.reset()
         #expect(model.text.isEmpty && model.note == nil)
-        #expect(model.listening == .listening)
     }
 
     @Test("a bare model is open, so that it draws its field and microphone")

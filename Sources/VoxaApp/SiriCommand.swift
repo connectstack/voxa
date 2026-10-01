@@ -1,4 +1,5 @@
 import Foundation
+import VoxaCore
 
 /// What came of handing Voxa a command from Siri.
 public enum SiriCommandOutcome: Sendable, Equatable {
@@ -19,11 +20,19 @@ public enum SiriCommandOutcome: Sendable, Equatable {
 @MainActor
 public enum SiriCommand {
     /// Hands `text` to Voxa as a command.
-    public static func run(_ text: String, on host: any HandsFreeHost) -> SiriCommandOutcome {
+    public static func run(_ text: String, on host: any CommandHost) -> SiriCommandOutcome {
         let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty else { return .nothing }
-        guard host.handsFreeAvailability == .ready else { return .busy }
-        return host.submitCommand(command) ? .started : .busy
+        guard !command.isEmpty else {
+            Log.session.info("Siri handed over nothing to do")
+            return .nothing
+        }
+        guard host.availability == .ready else {
+            Log.session.info("Siri handed over a command (\(command.count) characters) while Voxa was busy")
+            return .busy
+        }
+        let outcome: SiriCommandOutcome = host.submitCommand(command) ? .started : .busy
+        Log.session.info("Siri handed over a command (\(command.count) characters): \(String(describing: outcome), privacy: .public)")
+        return outcome
     }
 
     /// From an App Intent, which the system may have started Voxa to run: waits for the app to be up, then hands it over.

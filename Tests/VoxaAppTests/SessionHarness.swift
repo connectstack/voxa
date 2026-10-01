@@ -62,6 +62,23 @@ final class SessionHarness {
         return await waitUntil { await capture.isCapturing }
     }
 
+    /// Clicks the microphone button and waits until the microphone is open and the session is listening.
+    @discardableResult
+    func clickAndListen() async -> Bool {
+        controller.microphoneClicked()
+        guard await waitUntil({ controller.phase == .listening }) else { return false }
+        return await waitUntil { await capture.isCapturing }
+    }
+
+    /// Clicks the button again, to send what was said, and lets the release tail elapse, which stops the microphone.
+    func clickToSendAndFinishTail() async {
+        controller.microphoneClicked()
+        // The tail timer is armed once the click is processed.
+        _ = await waitUntil { clock.sleeperCount >= 2 }   // recording limit + tail
+        clock.advance(by: .milliseconds(250))
+        await settle()
+    }
+
     /// Lets the "not an accidental tap" hold time pass, and waits until the controller has noticed that it has: its timer task sets
     /// the flag a moment after the clock moves, and a key released before that would count as a tap.
     func holdLongEnough() async {

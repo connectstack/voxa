@@ -2,8 +2,9 @@
 
 A voice-controlled automation agent for macOS. Hold a hotkey, speak a command, and Voxa carries it out on your Mac using
 an LLM with tool calling, then shows and speaks the result. You can also type a command, or click the microphone in the
-**Voxa bar** and let it listen continuously, and Siri can hand it a command too. It lives in the menu bar, listens only when
-you have asked it to (a held key, or a microphone you switched on), and transcribes your voice on the Mac. The model can be
+**Voxa bar**, say it, and click again to send it, and Siri can hand it a command too. It lives in the menu bar, listens only while
+you hold the key or have clicked the microphone, and transcribes your voice on the Mac (unless you choose Apple online recognition,
+which uses Apple's servers as Siri does). The model can be
 Claude, OpenAI's GPT, or a model that runs on your own Mac through Ollama.
 
 > **Status: milestone 4 of 5.** Hold the key, speak, and Voxa carries the command out with an LLM and tools for apps and
@@ -70,16 +71,26 @@ is identical for all three, so the safety rules don't depend on which one you us
 
 ## Speech engines
 
-**Settings → General → Speech recognition** offers two engines, both Apple's and both running on your Mac:
+**Settings → General → Speech recognition** offers three engines, all Apple's:
 
 | Engine | What it is |
 |--------|------------|
-| Automatic | Apple's newest engine (`SpeechAnalyzer`, macOS 26) when its language model is installed, otherwise the classic recognizer. Needs no Speech Recognition permission |
-| Classic | `SFSpeechRecognizer`, forced on-device |
+| Automatic | Apple's newest on-device engine (`SpeechAnalyzer`, macOS 26) when its language model is installed, otherwise the classic recognizer. Needs no Speech Recognition permission. Runs on your Mac |
+| Classic | `SFSpeechRecognizer`, forced on-device. Runs on your Mac |
+| Apple online | `SFSpeechRecognizer` on Apple's servers: the recognition **Siri and Dictation use**. It hears names and accents better than the on-device models, and **your voice is sent to Apple while you speak**. Needs the Speech Recognition permission (macOS asks the first time). With no network it uses Automatic |
 
-Your voice is never sent anywhere: if a language has no on-device model, Voxa says so instead of falling back to a server. Try an
-engine without the app: `swift run voxa-dev transcribe clip.aiff --engine analyzer` (make a clip with `say -o clip.aiff "open
-safari"`; the classic engine needs Speech Recognition permission for the terminal).
+By default your voice never leaves the Mac: if a language has no on-device model, Voxa says so instead of falling back to a server.
+Apple online is only ever your choice. Try an engine without the app: `swift run voxa-dev transcribe clip.aiff --engine analyzer`
+(make a clip with `say -o clip.aiff "open safari"`; the classic engine needs Speech Recognition permission for the terminal).
+
+**If Voxa mishears you** (it writes "Handwoman Chalice" for "Hanuman Chalisa", say): the on-device models are weakest on names and
+on accents they have heard little of, and Siri hears you better because it recognizes on Apple's servers. Switch Speech recognition
+to **Apple online**. Then check **System Settings → Sound → Input**: that the input device is the one you mean (a pair of AirPods
+or a phone can quietly become the default) and that its input volume isn't near zero. Voxa's log says what it used and how loud it
+was, with no audio or words in it:
+`log show --last 5m --info --predicate 'subsystem == "com.rohitsainier.voxa" AND category == "audio"'` prints lines such as
+*capture started (48000 Hz, 1 channel(s)) on MacBook Pro Microphone, input volume 29%* and *heard 3.9 s: peak -34 dBFS, average
+-48 dBFS*. Siri itself stays available as the other route (see [Siri](#siri)).
 
 ## The Voxa bar
 
@@ -92,38 +103,59 @@ window to look for: your words as you say them with a live level, *Thinking…* 
 problem with a button that fixes it, and the question that needs an answer (the whole script, the address, why Voxa is asking, and
 **Allow** / **Don't Allow**). The orb changes colour with what is going on: red while it listens, blue while it works, amber while it
 waits for you, green when it is done. Nothing in the bar moves by itself; the one live thing is a level meter that follows your voice.
-A command that came from the push-to-talk key, from Siri, or from your voice shows in the same bar and puts it away when it is over;
-one you opened yourself goes back to waiting for the next.
+A command that came from the push-to-talk key, from Siri, or from the microphone shows in the same bar and puts it away when it is
+over; one you opened yourself and then said nothing to goes back to waiting for the next.
 
 - **Type** a command and press **Return**. It runs exactly like a spoken one. While you type, the bar has the keyboard (Voxa
   becomes the active app); the moment a command starts it gives the keyboard back to the app you were in, because a command may
   type or press keys there, and it takes neither typing nor clicks (except on a button of a question) while it only shows the
   command. Open it while Voxa is busy and it says so.
-- **Click the microphone** and Voxa listens continuously. There is no wake phrase: *everything you say while the microphone is on is
-  taken as a command*, so switch it off when other people are talking or a video is playing. The bar stays on screen while it
-  listens, the menu-bar icon becomes an ear, and macOS shows its orange microphone dot. If full control is on the bar says so, in
-  orange: whatever is said then runs without asking.
-- The microphone is closed while a command runs or Voxa is speaking (so it never hears its own voice, and **nothing said aloud can
-  answer an Allow card**: that waits for a click, ⌘↩, or the push-to-talk key held), and it opens again about a second after
-  Voxa has finished.
-- It is **never a saved setting**: a Mac that restarts comes back with the microphone off. It also switches itself off after a
-  silence of ten minutes (Settings → General → Voxa bar → *Stop listening after*), and the bar says why.
-- Recognition is on this Mac, with the engine chosen in Settings. What it hears is turned into text and discarded; only commands
-  are kept, in History, like any other.
-
-Try continuous listening without the app: `swift run voxa-dev handsfree clip.aiff --engine analyzer` cuts a recording into
-utterances, transcribes each with the real engine, and prints what would be commands (add `--noise rumble:-40` or
-`--background other.aiff` to see how a noisy room fares). `voxa-dev vad clip.aiff` shows only where the speech starts and stops.
+- **Click the microphone, say the command, click it again.** **It is the push-to-talk session, started and ended by a click instead
+  of a key**: the first click opens the microphone and the bar shows your words live with a level meter, exactly as it does while you
+  hold ⌥Space, and says *Click the microphone to send*; the second click sends them, as if you had let the key go, and Voxa carries
+  the command out. Nothing ends it but your click, so a pause, a breath or a long sentence is never cut off, and it never listens
+  while you haven't clicked. Esc cancels what you were saying and sends nothing. If it heard nothing it says so, and the bar is
+  ready for another try. It is the same session as the key, so it hears exactly as well as push-to-talk does.
+- Holding ⌥Space does the same from anywhere, without the bar. The two share one microphone: while one has it, the other does
+  nothing, and letting go of the key never ends what the button began.
+- The microphone button is out of use while a command runs or a question is waiting, and **nothing said through it can answer an
+  Allow card**: that waits for a click on the card, ⌘↩, or the push-to-talk key held. If full control is on, the bar says so, in
+  orange: what you ask then runs without asking first.
+- Recognition is on this Mac unless you chose Apple online in Settings ([Speech engines](#speech-engines)). What it hears is turned
+  into text and discarded; only commands are kept, in History.
+- **System Dictation works in the field** if you have it on (System Settings → Keyboard → Dictation): press its shortcut, speak, and
+  the words land in the field; press Return.
 
 ## Siri
 
-Siri can do the listening for you. Say **"Hey Siri, ask Voxa"** (or *"Tell Voxa"*, *"Give Voxa a command"*); Siri asks *"What should
-Voxa do?"*, and what you answer is handed to Voxa as a command, exactly as if you had typed it. Siri does the listening and the
-speech recognition, so Voxa opens no microphone for it. It works once Voxa has been opened (macOS registers the phrases from the
-app), Siri must be switched on in System Settings, the Mac must be unlocked (the shortcut requires it), and the phrases can be
-renamed in the Shortcuts app, where it is called **Give Voxa a Command**. It is two steps because Apple's App Shortcuts only take
-fixed phrases; there is no way for Siri to pass "open Safari and search for cats" in the same breath as "ask Voxa". Voxa then
-runs the same agent, policy, refusals and Allow cards as for a typed command. If Voxa is busy, Siri says so.
+Siri is the other way to talk to Voxa, and the only one that needs no key and no click: **Siri does the listening; Voxa gets the words.**
+(Voxa can't start Siri's own listening bar from a button of its own: there is no way for an app to do it, and Siri only hands a
+request to an app that is named in it. So Voxa's microphone button, above, does the same job itself, with your click and Apple's speech
+engine in place of Siri's.) Say **"Hey Siri, ask Voxa"** (or *"Tell Voxa"*, *"Give Voxa a command"*, *"Voxa
+command"*). Siri asks *"What should Voxa do?"*, you say it, and what Siri heard is handed to Voxa as a command, exactly as if you
+had typed it. You get Siri's own speech recognition, and Voxa opens no microphone and needs no speech-recognition permission for
+it. Voxa then runs the same agent, policy, refusals and Allow cards as for a typed command, shows what Siri heard in its bar, and
+says the reply; nothing said to Siri can approve an Allow card. If Voxa is busy, Siri says so.
+
+What you need:
+
+- **Siri switched on** (System Settings → Siri). Settings → General → *Talk to Voxa with Siri* says whether it is, and has a button that opens the pane.
+- **To talk without touching anything, "Hey Siri" switched on**: in System Settings → Apple Intelligence & Siri, turn on the switch
+  **Listen for "Hey Siri"** (macOS may then ask you to say a few phrases so that Siri learns your voice). Without it, click the
+  **Siri icon in the menu bar** instead, and say *"Ask Voxa"*. (The *Keyboard shortcut* in that pane, double-tapping Command by
+  default, opens Siri for typing, so with it you type *Ask Voxa* and then the command.)
+- If you don't **hear** Siri ask what Voxa should do, set **Siri responses** in the same pane to *Automatic* or *Prefer Spoken
+  Responses*: *Prefer Silent Responses* shows the question instead of saying it.
+- The **Mac unlocked**: the shortcut needs it, because a command can drive the whole Mac.
+- Voxa opened at least once, so that macOS registers its phrases. They can be renamed in the Shortcuts app, where the action is
+  called **Give Voxa a Command**. If Siri doesn't find it, look for *Voxa* in the Shortcuts app's list of apps. If Siri mishears the
+  name "Voxa", make it a shortcut of your own: in the Shortcuts app add *Give Voxa a Command* to a new shortcut and name it something
+  Siri hears easily (*"Computer"*, say); then *"Hey Siri, Computer"* does the same.
+
+It is two spoken steps because Apple's App Shortcuts only take fixed phrases; Siri can't pass "open Safari and search for cats" in
+the same breath as "ask Voxa". The menu-bar menu says how to talk (or what is missing), and Voxa's log
+(`log show --predicate 'subsystem == "com.rohitsainier.voxa"' --info`) says *Siri handed over a command (N characters)* each time
+one arrives, so you can tell whether a silence came from Siri or from Voxa.
 
 ## What Voxa can do
 
@@ -159,9 +191,9 @@ asking off, and the Safety section below says exactly what it changes.
 | A risky action comes up | The bar opens out into a card that shows exactly what will happen (the whole script, the address, the app) and why Voxa is asking. **Allow** / **Don't Allow**, **⌘↩** to allow, or hold ⌥Space and say *yes* or *no*. Esc stops the whole command. No answer in 60 seconds counts as *no* |
 | The reply | A short answer stays up for a few seconds and is **read aloud** (switch it off in Settings → General → Voice). Holding ⌥Space or pressing Esc stops the speech at once. Hold ⌥Space within two minutes for a follow-up ("make it three hours") |
 | Tap the key briefly | A hint: *Hold ⌥Space while you speak*. Push-to-talk needs a hold |
-| Press ⌥⇧Space (or **Type or Talk to Voxa…** in the menu) | The **Voxa bar** opens under the menu bar: a field with *Type to Voxa*, and a microphone on its right. Type a command and press Return. Esc puts it away |
-| Click the microphone in the bar | **Continuous listening**: the microphone turns red and Voxa takes whatever you say as a command, one after another, with no key and no wake phrase. It lets go of the microphone while it works or speaks and picks up again after. Click the microphone again, press Esc, or close the bar to stop; it also stops by itself after a silence (Settings → General → Voxa bar, ten minutes by default) |
-| Say *"Hey Siri, ask Voxa"* | Siri asks *What should Voxa do?*; what you say next is handed to Voxa as a command (see [Siri](#siri)) |
+| Press ⌥⇧Space (or **Type to Voxa…** in the menu) | The **Voxa bar** opens under the menu bar: a field with *Type to Voxa, or tell Siri “Ask Voxa”*. Type a command and press Return. Esc puts it away |
+| Click the microphone in the bar | The push-to-talk session without a key: the microphone turns red and your words appear live, with *Click the microphone to send*. **Click it again to send**; Voxa then works as for a held key. Nothing ends it but that click, so pause as long as you like. Esc cancels and sends nothing |
+| Say *"Hey Siri, ask Voxa"* (or click the Siri icon in the menu bar and say *"Ask Voxa"*) | Siri asks *What should Voxa do?*; what you say next, in Siri's own recognition, is handed to Voxa as a command (see [Siri](#siri)) |
 | Press Esc | Cancels the command at any point (listening, thinking, or waiting on a question) and dismisses; while a reply is showing, Esc dismisses it |
 | Say nothing | *I didn't catch that* |
 | Deny a permission | An error naming the permission with a button that opens System Settings |
@@ -242,7 +274,7 @@ sequenceDiagram
 | Permission | Used for | When it is asked |
 |------------|----------|------------------|
 | Microphone | Hearing your command | First push-to-talk, or from the welcome guide |
-| Speech Recognition | Apple's classic on-device recognizer (not needed by the newer engine) | First push-to-talk, only if that engine runs |
+| Speech Recognition | Apple's classic recognizer, and Apple online recognition (not needed by the newer on-device engine) | First push-to-talk, only if one of those engines runs |
 | Calendars, Reminders | The calendar and reminders tools | The first time a command needs one, or ahead of time from Settings → Permissions |
 | Accessibility | Reading the front window (title, selection, its controls) and clicking, typing and pressing keys in it | When a command needs it (macOS sends you to System Settings to switch it on), or ahead of time from the welcome guide or Settings → Permissions |
 | Automation | `run_applescript` controlling another app | The first time a script talks to that app (macOS asks per app) |
@@ -254,8 +286,9 @@ no, the command ends with a message and a button that opens the right System Set
 being asked to write around it. **Settings → Permissions** shows all of them at once with a button on each, and a row turns green
 when you come back from System Settings.
 
-Speech recognition is always on-device. If a language has no on-device model, Voxa says so and tells you how to install
-one rather than sending audio to Apple's servers.
+Speech recognition is on-device unless you choose **Apple online** in Settings, which sends your voice to Apple while you speak,
+as Siri and Dictation do. If a language has no on-device model, Voxa says so and tells you how to install one rather than sending
+audio to Apple's servers on its own.
 
 ## Security model
 
@@ -348,7 +381,7 @@ exhaustively tested. The rules, all in force in this milestone:
 - **What is sent, and to whom.** The text of your command, the tool definitions, and the results tools return go to the
   provider you chose: Anthropic, OpenAI (with `store: false`, so nothing is kept for later lookup), or your Ollama server. With
   Ollama on this Mac nothing leaves it; an Ollama server on another machine, or a cloud model, is your own choice and Settings
-  says so. Your voice never leaves the Mac. Ollama takes no key; its address may be `http` because it is usually on this Mac.
+  says so. Your voice never leaves the Mac unless you choose Apple online recognition. Ollama takes no key; its address may be `http` because it is usually on this Mac.
 
 ## Development
 
@@ -371,8 +404,6 @@ allowed for whatever runs the tests (Terminal, Xcode); otherwise they are skippe
 say -o /tmp/clip.aiff "open safari and search for swift concurrency"
 swift run voxa-dev speech-status                       # what each speech engine can do on this Mac (downloads nothing)
 swift run voxa-dev transcribe /tmp/clip.aiff           # run an engine over a file
-swift run voxa-dev vad /tmp/clip.aiff --noise rumble:-40    # where speech starts and stops in a recording, with a fan under it
-swift run voxa-dev handsfree /tmp/clip.aiff --engine analyzer   # what continuous listening would take as commands (real engine)
 swift run voxa-dev system-prompt                       # print the agent system prompt exactly as sent
 swift run voxa-dev ask "open example dot com" --dry-run  # a typed command through the real model client, agent loop and tools
 swift run voxa-dev ask "open safari" --provider openai --dry-run                    # …with OpenAI ($OPENAI_API_KEY)
@@ -410,8 +441,8 @@ scripts/e2e-providers.sh      # Claude, OpenAI and Ollama: a confirmation, the a
 scripts/e2e-tools.sh          # calendar, reminders, clipboard and context tools on sample data, another app's window, screenshots
                               # and files (a pretend Safari and a pretend disk), a page and a file name with a hidden
                               # instruction, the permission gate, spoken replies (one short sentence is said aloud), the walkthrough
-scripts/e2e-bar.sh            # the Voxa bar: typing a command, the microphone button (continuous listening, played from a clip),
-                              # that a voice can't approve an Allow card, the idle switch-off, and Siri's hand-over
+scripts/e2e-bar.sh            # the Voxa bar: typing a command, the microphone button (click, talk, click to send; played from a clip,
+                              # once with Apple's own speech engine), Esc, that the button can't answer an Allow card, and Siri's hand-over
 ```
 
 **Build somewhere of your own first.** `scripts/build.sh` writes to `build/DerivedData`, which is where `make run` and
@@ -458,9 +489,9 @@ notifyutil -p com.rohitsainier.voxa.debug.bar.show       # the Voxa bar (also: b
 notifyutil -p com.rohitsainier.voxa.debug.siri           # hand the text in that file over as Siri's shortcut does
 ```
 
-Continuous listening can be tried without a microphone: launch with `VOXA_DEBUG_HANDSFREE_AUDIO=clip.wav` (a 16 kHz clip, played
-once in real time in place of the microphone, then silence) and `VOXA_DEBUG_HANDSFREE_TRANSCRIPTS="first|second"` (what the
-recognizer says for the first, second… utterance), then press the bar's microphone with `bar.mic`. `scripts/e2e-bar.sh` does this.
+Talking can be tried without a microphone: launch with `VOXA_DEBUG_MIC_AUDIO=clip.wav` (a 16 kHz clip, played once in real time in
+place of the microphone, then silence) and `VOXA_DEBUG_MIC_TRANSCRIPTS="first|second"` (what the recognizer says the first,
+second… time someone speaks), then click the bar's microphone with `bar.mic`, and again to send. `scripts/e2e-bar.sh` does this.
 
 `VOXA_DEBUG_DEFAULTS_SUITE` keeps the app's settings in a separate preferences domain (write the provider, model and address
 there instead of clicking through Settings; `scripts/e2e-providers.sh` shows how). OpenAI's and Ollama's addresses are
@@ -571,10 +602,32 @@ granted Accessibility permission: the automated checks use sample data and scrip
 - [ ] Settings → History: your commands appear with what happened; search finds one; *Show in Finder* reveals the file; *Clear
       History…* asks, then empties it.
 
-**The Voxa bar, continuous listening and Siri: need you and your voice** (the automated checks type into the bar, play a recording
-in place of the microphone with a scripted recognizer, and call the code Siri's shortcut calls; real speech was only checked with
-`voxa-dev handsfree` on generated speech, and the real bar was only seen in a private copy of the app and in screenshots)
+**The Voxa bar, its microphone, and Siri: need you and your voice** (the automated checks type into the bar, play a recording in place
+of the microphone, and call the code Siri's shortcut calls. They run Apple's real speech engine on a clip made with `say`, so the
+words-start-and-end-a-command logic has been seen working on speech, but never on yours, in your room; and nothing here has been said to
+a real Siri, which only you can do)
 
+- [ ] **The microphone:** press **⌥⇧Space**, click the microphone. It turns red, the bar says *Listening…* and *Click the microphone to
+      send*, macOS shows its orange dot. Say *"open Notes"*: your words appear in the bar as you say them, with a level meter below.
+      Click the microphone again: Voxa sends them, works and answers. Compare it with holding ⌥Space for the same sentence: it should
+      hear it just as well.
+- [ ] Say a long sentence with a long pause in the middle, and then another: nothing is sent until you click. Click without saying
+      anything: *I didn't catch that*, with how to try again, and the bar is ready for another click.
+- [ ] While it listens, press Esc: what you said is dropped, nothing is sent, the dot goes away, and the bar is waiting again. Click the
+      microphone and then put the bar away (⌥⇧Space, or Esc twice): the dot goes away. Click away to another app while it listens: the
+      bar stays where it can be seen, with the microphone red, until you click it again.
+- [ ] While it listens, hold ⌥Space and let go: the button's microphone is still open, and only a click ends it. While a command runs
+      or a question is showing the microphone button is dimmed and does nothing.
+- [ ] Ask for something that needs an Allow card (*"delete the file called test"* in a scratch folder): the card appears and **saying
+      "yes" does nothing**; click Allow or press ⌘↩. Turn full control on (Settings → Safety): the bar shows the orange warning line.
+- [ ] Deny the microphone in System Settings and click the microphone in the bar: the bar says why, with a button that opens the pane.
+- [ ] **Siri:** Settings → General → *Talk to Voxa with Siri* says whether Siri and "Hey Siri" are on, and its button opens the pane;
+      switch "Hey Siri" on. Open Voxa once. Say *"Hey Siri, ask Voxa"* (or click the Siri icon in the menu bar and say *"Ask Voxa"*).
+      Siri asks what Voxa should do; say *"what's on my calendar today"*. Voxa's bar appears with those words, works, and answers. In
+      the Shortcuts app, *Voxa → Give Voxa a Command* is there. With the Mac locked, Siri refuses. While a command runs, Siri says
+      Voxa is busy. The log line *Siri handed over a command* appears each time. Saying "yes" to Siri never answers an Allow card.
+- [ ] The menu-bar menu says how to talk to Voxa through Siri: *Talk: say "Hey Siri, ask Voxa"* when Hey Siri is on, or *Turn On "Listen
+      for Hey Siri" to Talk to Voxa…* (which opens System Settings) when it is off.
 - [ ] Press **⌥⇧Space**: the bar opens under the menu bar with the cursor in it. Type *"what's on my calendar today"* and press Return: it
       runs, and its progress and reply appear in the same bar, which puts itself away afterwards. Esc puts an open bar away. Click on
       another app while it is open: it closes. *"Type hello"* typed in the bar goes to the app that was in front, not to the bar.
@@ -584,21 +637,8 @@ in place of the microphone with a scripted recognizer, and call the code Siri's 
 - [ ] Press **⌥⇧Space** while a command is running: the bar says Voxa is busy instead of taking the keyboard, and the command carries on.
 - [ ] Look at the bar in light and dark appearance, on a bright and a dark wallpaper, and with *Reduce transparency* on: the text is
       readable everywhere.
-- [ ] Menu bar → **Type or Talk to Voxa…** does the same. ⌘V pastes into the field; ⌘A, ⌘C, ⌘X and ⌘Z work.
-- [ ] Click the **microphone** in the bar: it turns red, the bar says it is listening, the menu-bar icon becomes an ear, macOS shows
-      its orange dot. Say *"open Notes"*: the microphone lets go while Voxa works and speaks, then listens again; say another
-      command without touching anything. Watch that a cough or a sigh doesn't start a command.
-- [ ] With the microphone on, ask for something that needs an Allow card (*"delete the file called test"* in a scratch folder): the card
-      appears and **saying "yes" does nothing** (the microphone is closed); click Allow or press ⌘↩.
-- [ ] Turn full control on (Settings → Safety) and click the microphone: the bar shows the orange warning line.
-- [ ] Click the microphone again, press Esc, or press ⌥⇧Space: listening stops and the dot disappears. Quit and reopen Voxa: the
-      microphone is off. Leave it on and silent for ten minutes (or set *Stop listening after* to 5): it stops and the bar says so.
-- [ ] Deny the microphone in System Settings and click the microphone in the bar: the bar says why, with the microphone crossed
-      out; allow it and it starts by itself within a few seconds.
-- [ ] With another app playing speech, the microphone on: what it takes is whatever it hears. (Expect false commands; this is the
-      reason to switch it off when others are talking.)
-- [ ] **Siri:** open Voxa once, then say *"Hey Siri, ask Voxa"*, then a command. Siri asks what to do and Voxa runs it. In the Shortcuts
-      app, *Voxa → Give Voxa a Command* is there. With the Mac locked, Siri refuses. While a command runs, Siri says Voxa is busy.
+- [ ] If Dictation is on (System Settings → Keyboard), press its shortcut with the bar open and speak: the words land in the field, and
+      Return sends them. Menu bar → **Type or Talk to Voxa…** does the same as ⌥⇧Space; ⌘V pastes into the field; ⌘A, ⌘C, ⌘X and ⌘Z work.
 
 **Milestone 4: needs your Mac, Accessibility and Screen Recording** (nothing below has been run against a real
 app's window, real synthetic input, a real screen capture of your apps, or real files in your folders:

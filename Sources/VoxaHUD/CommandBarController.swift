@@ -70,6 +70,14 @@ final class CommandBarPanel: NSPanel {
     }
 }
 
+/// The bar's content. A click on one of its buttons has to act at once, whether or not the panel has the keyboard, and often it doesn't:
+/// the bar is listening, or showing a question, and the app in front has the keyboard. A hosting view spends the first click on a window
+/// that isn't key on making it key, which a panel that may not become key never does, so the click would be lost. (It is how the
+/// microphone button, a question's buttons and an error's button take a click.)
+final class BarHostingView: NSHostingView<CommandBarView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// Owns the Voxa bar's window: the one place Voxa shows itself. It holds a field to type in and a microphone (`CommandBarModel`), and
 /// everything a command goes through below them (`HUDModel`): what was heard, progress, the reply, a problem, and the question that
 /// needs an answer. It is what the session and the confirmations present to (`HUDPresenting`).
@@ -77,8 +85,8 @@ final class CommandBarPanel: NSPanel {
 /// It is at the top centre of the screen, just below the menu bar, and there are two reasons it is showing. The person opened it (the
 /// shortcut, the menu): it is theirs to type in and click, until they put it away. Or a command is under way (the push-to-talk key,
 /// Siri, something typed or said): it shows what the command is doing, without taking the keyboard or the clicks, and goes when
-/// that is over. The two can overlap: a bar that is listening stays where it can be seen, so the microphone is always visibly live,
-/// and goes back to waiting for the next command when a command is over.
+/// that is over. The two can overlap: a bar that was opened stays where it can be seen while the microphone button has Voxa listening,
+/// so the microphone is always visibly live, and goes back to waiting for the next command when a command is over.
 @MainActor
 public final class CommandBarController: HUDPresenting {
     public let model: CommandBarModel
@@ -96,7 +104,8 @@ public final class CommandBarController: HUDPresenting {
     /// Whether a command has the bar showing, from its start until what it had to say is over.
     private var sessionActive = false
 
-    /// Whether the bar should stay when the person clicks elsewhere (the microphone is on).
+    /// Whether the microphone button's click has Voxa listening: the bar stays where it can be seen, and a click elsewhere doesn't put
+    /// it away.
     public var keepsOpen: @MainActor () -> Bool = { false }
 
     /// - Parameter activation: How the bar takes the keyboard; the application's own, unless a test brings its own.
@@ -161,7 +170,7 @@ public final class CommandBarController: HUDPresenting {
     }
 
     /// Gives the keyboard back to the app that had it before the bar took it, because a command is starting and may type in it. A bar
-    /// that isn't listening stops being the person's, and only shows the command; a listening one stays, where it can be seen.
+    /// that isn't holding the microphone open stops being the person's, and only shows the command.
     public func releaseKeyboard() {
         if !keepsOpen() { model.isOpen = false }
         refreshPresentation()
@@ -249,6 +258,10 @@ public final class CommandBarController: HUDPresenting {
 
     public func setAnswerStatus(_ status: AnswerStatus) {
         content.answerStatus = status
+    }
+
+    public func setListeningEndsOnClick(_ endsOnClick: Bool) {
+        content.endsOnClick = endsOnClick
     }
 
     /// What a command had to say is over, now or after `delay`: the bar goes back to waiting for a command if the person has it open (or
@@ -369,7 +382,7 @@ public final class CommandBarController: HUDPresenting {
 
         // A plain hosting view whose sizing is switched off: SwiftUI must never drive the window frame through Auto Layout (see
         // `CommandBarView.init`). The view reports its size and `contentSizeDidChange` resizes the panel.
-        let host = NSHostingView(
+        let host = BarHostingView(
             rootView: CommandBarView(model: model, content: content) { [weak self] size in
                 self?.contentSizeDidChange(size)
             }
@@ -479,12 +492,14 @@ extension CommandBarController {
         if case .error(let error) = content.mode, let recovery = error.recovery { content.onRecovery?(recovery) }
     }
 
-    /// What a shell wants to know about the bar: whether it is showing and what, whether it can take typing, and whether it is the
-    /// person's. Debug builds only.
+    /// What a shell wants to know about the bar: whether it is showing and what, whether it can take typing, whether it is the
+    /// person's, what its microphone button would do, and whether any words have been heard. Debug builds only.
     public var debugSummary: String {
-        "bar=\(isVisible ? "visible" : "hidden") barKey=\(isPanelKey) barText=\(model.text.isEmpty ? "empty" : "typed") "
+        let mic = MicrophoneButton.role(for: content.mode, endsOnClick: content.endsOnClick)
+        return "bar=\(isVisible ? "visible" : "hidden") barKey=\(isPanelKey) barText=\(model.text.isEmpty ? "empty" : "typed") "
             + "barNote=\(model.note == nil ? "none" : "shown") barMode=\(content.mode.debugName) barOpen=\(model.isOpen) "
-            + "barCanKey=\(panelCanBecomeKey) barClicks=\(!panelIgnoresMouseEvents)"
+            + "barCanKey=\(panelCanBecomeKey) barClicks=\(!panelIgnoresMouseEvents) barMic=\(mic) "
+            + "barHeard=\(content.transcript.isEmpty ? "nothing" : "words")"
     }
 }
 

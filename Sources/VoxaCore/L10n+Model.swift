@@ -160,7 +160,7 @@ extension L10n {
         public static var privacy: String {
             String(
                 localized:
-                    "Your voice is turned into text on this Mac and never leaves it. The text of your command, and anything a tool reads for you, is sent to Anthropic to decide what to do. The key is kept in the macOS Keychain.",
+                    "Your voice is turned into text on this Mac and never leaves it, unless you choose Apple online recognition in Settings. The text of your command, and anything a tool reads for you, is sent to Anthropic to decide what to do. The key is kept in the macOS Keychain.",
                 comment: "Settings privacy note under the API key"
             )
         }

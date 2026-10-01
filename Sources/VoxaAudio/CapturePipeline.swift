@@ -18,12 +18,14 @@ final class CapturePipeline: @unchecked Sendable {
     private struct State {
         var samplesEmitted = 0
         var meter = LevelMeter()
+        var heard = LevelStatistics()
         var isFinished = false
     }
 
-    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let state: OSAllocatedUnfairLock<State>
 
     init() {
+        state = OSAllocatedUnfairLock(initialState: State())
         let (chunks, chunkContinuation) = AsyncThrowingStream<AudioChunk, any Error>.makeStream(
             bufferingPolicy: .unbounded
         )
@@ -47,6 +49,7 @@ final class CapturePipeline: @unchecked Sendable {
         guard !samples.isEmpty else { return }
         let output = state.withLock { state -> (chunk: AudioChunk, level: AudioLevel)? in
             guard !state.isFinished else { return nil }
+            state.heard.add(samples)
             let chunk = AudioChunk(
                 samples: samples,
                 startTime: Double(state.samplesEmitted) / AudioChunk.canonicalSampleRate
@@ -62,13 +65,44 @@ final class CapturePipeline: @unchecked Sendable {
 
     /// Ends both streams. Idempotent; only the first call's error (if any) is delivered.
     func finish(throwing error: (any Error)? = nil) {
-        let isFirstCall = state.withLock { state -> Bool in
+        let (isFirstCall, heard) = state.withLock { state -> (Bool, LevelStatistics) in
             let wasFinished = state.isFinished
             state.isFinished = true
-            return !wasFinished
+            return (!wasFinished, state.heard)
         }
         guard isFirstCall else { return }
+        if heard.seconds >= 0.3 {
+            // Numbers only, never audio or words: how loud what the microphone gave was, for telling a microphone that is set too low
+            // from a recognizer that mishears.
+            Log.audio.info(
+                "heard \(String(format: "%.1f", heard.seconds)) s: peak \(heard.peakDecibels) dBFS, average \(heard.rmsDecibels) dBFS"
+            )
+        }
         chunkContinuation.finish(throwing: error)
         levelContinuation.finish()
+    }
+}
+
+/// How loud one capture was, for the log.
+struct LevelStatistics: Sendable, Equatable {
+    private(set) var samples = 0
+    private(set) var peak: Float = 0
+    private var sumOfSquares: Double = 0
+
+    var seconds: Double { Double(samples) / AudioChunk.canonicalSampleRate }
+    var peakDecibels: Int { Self.decibels(peak) }
+    var rmsDecibels: Int { Self.decibels(samples > 0 ? Float((sumOfSquares / Double(samples)).squareRoot()) : 0) }
+
+    mutating func add(_ block: [Float]) {
+        for sample in block {
+            peak = max(peak, abs(sample))
+            sumOfSquares += Double(sample) * Double(sample)
+        }
+        samples += block.count
+    }
+
+    /// Decibels relative to full scale, rounded; silence is -120.
+    static func decibels(_ linear: Float) -> Int {
+        Int((20 * log10(max(linear, 1e-6))).rounded())
     }
 }

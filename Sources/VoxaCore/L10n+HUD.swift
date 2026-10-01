@@ -29,6 +29,12 @@ extension L10n {
                 comment: "HUD hint while push-to-talk is held. The argument is the shortcut, e.g. ⌥Space"
             )
         }
+        public static var clickToSend: String {
+            String(
+                localized: "Click the microphone to send",
+                comment: "HUD hint while the microphone button's click has Voxa listening, with no key held"
+            )
+        }
         public static var escapeKeyLabel: String {
             String(localized: "esc", comment: "Label on the escape key cap in the HUD")
         }
@@ -42,6 +48,12 @@ extension L10n {
             String(
                 localized: "Hold \(shortcut) and speak, then release.",
                 comment: "HUD detail when no speech was recognized. The argument is the shortcut"
+            )
+        }
+        public static var didntCatchClickDetail: String {
+            String(
+                localized: "Click the microphone, say your command, then click it again.",
+                comment: "HUD detail when no speech was recognized after the microphone button was clicked"
             )
         }
         public static var holdToTalk: String {

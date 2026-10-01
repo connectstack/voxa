@@ -201,10 +201,10 @@ extension AppEnvironment {
 
     /// Hooks that work the Voxa bar the way a person does: open it, type into it, press its microphone.
     ///   notifyutil -p com.rohitsainier.voxa.debug.bar.show          opens it (as the shortcut and the menu item do)
-    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.hide          Esc: puts it away and stops listening
+    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.hide          Esc: puts it away and lets go of the microphone
     ///   notifyutil -p com.rohitsainier.voxa.debug.bar.type          types the text in VOXA_DEBUG_COMMAND_FILE into the field and presses Return
     ///   notifyutil -p com.rohitsainier.voxa.debug.bar.fill          only types it, so the bar can be looked at
-    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.mic           clicks the microphone button
+    ///   notifyutil -p com.rohitsainier.voxa.debug.bar.mic           clicks the microphone button (start listening; again, send)
     private func installBarDebugHooks() {
         func text() -> String? {
             ProcessInfo.processInfo.environment["VOXA_DEBUG_COMMAND_FILE"]
@@ -238,7 +238,7 @@ extension AppEnvironment {
         }
         var micToken: Int32 = 0
         notify_register_dispatch(debugHook("bar.mic"), &micToken, .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.bar.model.toggleListening() }
+            MainActor.assumeIsolated { self?.bar.model.microphoneClicked() }
         }
     }
 
@@ -322,7 +322,7 @@ extension AppEnvironment {
             + "mic=\(permissions.status(of: .microphone)) speech=\(permissions.status(of: .speechRecognition)) "
             + "provider=\(settings.current.provider.rawValue) settingsTab=\(settingsWindow.selectedTab.rawValue) "
             + "welcome=\(onboardingWindow.isVisible) speaking=\(speaker.isSpeaking) "
-            + "accessibility=\(permissions.status(of: .accessibility)) handsFree=\(handsFree.state.debugName) \(bar.debugSummary) "
+            + "accessibility=\(permissions.status(of: .accessibility)) \(bar.debugSummary) "
             + "hasKey=\(keyStores[settings.current.provider]?.hasKey() ?? false)\n"
         try? line.write(toFile: path, atomically: true, encoding: .utf8)
     }
@@ -392,19 +392,6 @@ extension AppEnvironment {
     private func showDebugConfirmation(_ prompt: ConfirmationPrompt) {
         bar.show(.confirm(prompt))
         bar.setConfirmationKeysEnabled(true)
-    }
-}
-
-private extension HandsFreeState {
-    /// A short stable name for the debug report, which a shell reads.
-    var debugName: String {
-        switch self {
-        case .off: "off"
-        case .starting: "starting"
-        case .listening: "listening"
-        case .paused(let availability): "paused.\(availability)"
-        case .unavailable: "unavailable"
-        }
     }
 }
 #endif

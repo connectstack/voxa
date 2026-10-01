@@ -26,20 +26,6 @@ let usage = """
           The classic engine needs Speech Recognition permission for the launching app (e.g. Terminal); the analyzer engine
           (macOS 26) does not.
 
-      voxa-dev vad <audio-file> [--lead 2] [--trail 2] [--repeat N --gap 2] [--level DB] [--noise rumble|white|hum[:DB]]
-                 [--background <audio-file> [--background-db DB]] [--save-dir DIR]
-          Runs the voice-activity detector (what hands-free listening uses to cut speech out of a microphone stream) over a
-          file with silence around it, and prints each utterance it finds and when. --noise and --background mix a fan, a hiss,
-          a hum or another recording under it, to see how it copes with a noisy room. --save-dir writes each utterance as a WAV.
-
-      voxa-dev handsfree <audio-file> [--engine automatic|classic|analyzer]
-                         [--lead 2] [--trail 2] [--repeat N --gap 2] [--level DB] [--noise rumble|white|hum[:DB]]
-                         [--background <audio-file> [--background-db DB]]
-          What continuous listening (the microphone button in the Voxa bar) would do with a recording, with the real speech engine: it
-          is cut into utterances, each is turned into text, and each that is words would be a command. Nothing is run. Shows how a
-          voice or a noisy room fares. (The classic engine needs Speech Recognition permission for the launching app; the analyzer
-          engine does not.)
-
       voxa-dev speech-status [--locale en_US]
           Read-only report of what each speech engine can do on this Mac (permissions, models). Downloads nothing.
 
@@ -173,10 +159,6 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "transcribe":
     await transcribe(Array(arguments.dropFirst()))
-case "vad":
-    await vad(Array(arguments.dropFirst()))
-case "handsfree":
-    await handsFree(Array(arguments.dropFirst()))
 case "speech-status":
     await speechStatus(Array(arguments.dropFirst()))
 case "hud-snapshots":

@@ -4,12 +4,12 @@ import VoxaAudio
 import VoxaCore
 import VoxaSpeech
 
-// Debug builds only. They let a shell test hands-free listening in the real app without a person or a microphone: the "microphone"
+// Debug builds only. They let a shell test talking to the real app without a person or a microphone: the "microphone"
 // plays an audio file (made with `say`) once, in real time, then hears silence; and what the recognizer "hears" is scripted.
 // Release builds never contain them, and nothing here does anything unless the app was launched with the variables below.
 //
-//   VOXA_DEBUG_HANDSFREE_AUDIO=/path/clip.wav       what hands-free's microphone hears, once, then silence
-//   VOXA_DEBUG_HANDSFREE_TRANSCRIPTS="a|b|c"        what the Nth utterance is heard as (then empty)
+//   VOXA_DEBUG_MIC_AUDIO=/path/clip.wav       what the microphone hears, once, then silence
+//   VOXA_DEBUG_MIC_TRANSCRIPTS="a|b|c"        what the Nth time someone speaks is heard as (then empty)
 
 /// A microphone that plays one file, in real time, and then keeps hearing silence until it is stopped. Stopping and starting it
 /// again carries on from where the file had got to, so the file is only ever heard once.
@@ -64,7 +64,9 @@ actor DebugFileMicrophone: AudioCapturing {
     }
 }
 
-/// A recognizer that ignores the audio and says what it was told to: the Nth utterance is the Nth text.
+/// A recognizer that says what it was told to, and hears the audio only as far as telling sound from silence: the first loud chunk
+/// makes it say the next scripted text (as the words so far, which is what a live recognizer does), and when the audio ends it says
+/// that text as final. A stretch of audio with no sound in it ends with nothing said, and uses up none of the script.
 final class DebugScriptedTranscripts: SpeechRecognizerProviding, SpeechRecognizer, @unchecked Sendable {
     private let lock = NSLock()
     private var texts: [String]
@@ -83,9 +85,19 @@ final class DebugScriptedTranscripts: SpeechRecognizerProviding, SpeechRecognize
     ) -> AsyncThrowingStream<Transcript, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                do { for try await _ in audio {} } catch {}
-                let text = lock.withLock { texts.isEmpty ? "" : texts.removeFirst() }
-                continuation.yield(Transcript(text: text, isFinal: true))
+                var said: String?
+                do {
+                    for try await chunk in audio where said == nil {
+                        let power = chunk.samples.reduce(Float(0)) { $0 + $1 * $1 } / Float(max(1, chunk.samples.count))
+                        guard power > 1e-5 else { continue }
+                        let text = lock.withLock { texts.isEmpty ? "" : texts.removeFirst() }
+                        said = text
+                        continuation.yield(Transcript(text: text, isFinal: false))
+                    }
+                    // Past the first sound, the rest of the audio is only drained.
+                    for try await _ in audio {}
+                } catch {}
+                continuation.yield(Transcript(text: said ?? "", isFinal: true))
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }

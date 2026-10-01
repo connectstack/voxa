@@ -1,9 +1,9 @@
 import SwiftUI
 import VoxaCore
 
-/// The Voxa bar: one glass card that holds a field to type a command in, Voxa's orb, a microphone that listens until it is clicked
-/// again, and, below them, everything Voxa has to say while it works: what it heard, its progress, its reply, a problem, and the
-/// question it needs answered. Pure SwiftUI over `CommandBarModel` (the field and the microphone) and `HUDModel` (what is below), so it
+/// The Voxa bar: one glass card that holds a field to type a command in, Voxa's orb, a microphone button (click it, say the command,
+/// click it again to send), and, below them, everything Voxa has to say while it works: what it heard, its progress, its reply, a
+/// problem, and the question it needs answered. Pure SwiftUI over `CommandBarModel` (the field and the microphone) and `HUDModel` (what is below), so it
 /// can be hosted in a panel or drawn to an image.
 public struct CommandBarView: View {
     private let input: CommandBarModel
@@ -24,7 +24,7 @@ public struct CommandBarView: View {
     }
 
     public var body: some View {
-        let look = BarLook(mode: content.mode, listening: input.listening)
+        let look = BarLook(mode: content.mode)
         VStack(spacing: 0) {
             row(look: look)
             BarContent(input: input, content: content, look: look)
@@ -55,7 +55,7 @@ public struct CommandBarView: View {
             VoxaOrb(look: look)
             center
             if input.isOpen {
-                MicrophoneButton(model: input)
+                MicrophoneButton(model: input, content: content)
             }
         }
         .padding(.leading, 14)
@@ -68,7 +68,7 @@ public struct CommandBarView: View {
     @ViewBuilder
     private var center: some View {
         if input.isOpen && content.mode.allowsTyping {
-            TextField(input.placeholder, text: Bindable(input).text)
+            TextField(L10n.Bar.placeholder, text: Bindable(input).text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 18))
                 .focused($fieldFocused)
@@ -101,7 +101,7 @@ public struct CommandBarView: View {
         case .preparing: L10n.HUD.preparing
         case .listening: L10n.HUD.placeholder
         case .transcribing: L10n.HUD.transcribing
-        default: input.placeholder
+        default: L10n.Bar.placeholder
         }
     }
 }

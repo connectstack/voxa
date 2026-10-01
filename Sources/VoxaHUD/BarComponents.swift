@@ -45,9 +45,9 @@ enum BarLook: Equatable {
     /// Something went wrong.
     case problem
 
-    init(mode: HUDMode, listening: HandsFreeState) {
+    init(mode: HUDMode) {
         switch mode {
-        case .idle: self = listening.isListening ? .listening : .idle
+        case .idle: self = .idle
         case .preparing, .listening: self = .listening
         case .transcribing, .thinking, .acting: self = .working
         case .confirm(let prompt): self = .asking(sensitive: prompt.risk == .sensitive)
@@ -225,54 +225,59 @@ struct LiveWaveform: View {
 
 // MARK: - The microphone button
 
-/// The microphone: plain while off, red while it listens, dimmed while Voxa works, and crossed out when it can't listen.
+/// The microphone button: click it, say the command, click it again to send. Plain while Voxa waits, red while it listens (and then a
+/// click sends what was said), dimmed while anything else has the microphone or a command is under way.
 struct MicrophoneButton: View {
     let model: CommandBarModel
+    let content: HUDModel
+
+    /// What a click on it would do now.
+    enum Role: Equatable {
+        /// Nothing is under way: a click starts listening.
+        case start
+        /// The button's own click has Voxa listening: a click sends what was said.
+        case send
+        /// A held key has the microphone, or a command is being understood, carried out or asked about: a click does nothing.
+        case unavailable
+    }
+
+    var role: Role { Self.role(for: content.mode, endsOnClick: content.endsOnClick) }
+
+    static func role(for mode: HUDMode, endsOnClick: Bool) -> Role {
+        guard mode.isInFlight else { return .start }
+        let listening = mode == .preparing || mode == .listening
+        return endsOnClick && listening ? .send : .unavailable
+    }
 
     var body: some View {
+        let role = role
         Button {
-            model.toggleListening()
+            model.microphoneClicked()
         } label: {
             ZStack {
-                Circle().fill(fill)
-                Image(systemName: symbol)
+                Circle().fill(fill(for: role))
+                Image(systemName: role == .send ? "mic.fill" : "mic")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(symbolColor)
+                    .foregroundStyle(role == .send ? Color.white : Color.secondary)
             }
             .frame(width: 38, height: 38)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(model.listening.isOn ? L10n.Bar.stopListening : L10n.Bar.startListening)
-        .accessibilityLabel(model.listening.isOn ? L10n.Bar.stopListening : L10n.Bar.startListening)
-        .accessibilityAddTraits(model.listening.isOn ? .isSelected : [])
+        .disabled(role == .unavailable)
+        .opacity(role == .unavailable ? 0.45 : 1)
+        .help(role == .send ? L10n.Bar.microphoneSend : L10n.Bar.microphoneStart)
+        .accessibilityLabel(role == .send ? L10n.Bar.microphoneSend : L10n.Bar.microphoneStart)
+        .accessibilityAddTraits(role == .send ? .isSelected : [])
     }
 
-    private var fill: AnyShapeStyle {
-        switch model.listening {
-        case .off: AnyShapeStyle(.primary.opacity(0.07))
-        case .starting, .listening:
+    private func fill(for role: Role) -> AnyShapeStyle {
+        switch role {
+        case .start, .unavailable: AnyShapeStyle(.primary.opacity(0.07))
+        case .send:
             AnyShapeStyle(
                 LinearGradient(colors: [BarPalette.red, BarPalette.pink], startPoint: .topLeading, endPoint: .bottomTrailing)
             )
-        case .paused: AnyShapeStyle(BarPalette.red.opacity(0.4))
-        case .unavailable: AnyShapeStyle(BarPalette.orange.opacity(0.18))
-        }
-    }
-
-    private var symbol: String {
-        switch model.listening {
-        case .off: "mic"
-        case .unavailable: "mic.slash.fill"
-        case .starting, .listening, .paused: "mic.fill"
-        }
-    }
-
-    private var symbolColor: Color {
-        switch model.listening {
-        case .off: .secondary
-        case .unavailable: BarPalette.orange
-        case .starting, .listening, .paused: .white
         }
     }
 }

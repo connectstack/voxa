@@ -76,10 +76,13 @@ public enum L10n {
         public static var engineClassic: String {
             String(localized: "Classic on-device recognizer", comment: "Speech engine option")
         }
+        public static var engineOnline: String {
+            String(localized: "Apple online (like Siri and Dictation)", comment: "Speech engine option")
+        }
         public static var engineHelp: String {
             String(
                 localized:
-                    "Audio is always transcribed on this Mac. Automatic uses the newest Apple engine when its language model is installed.",
+                    "Automatic and Classic transcribe on this Mac; Automatic uses the newest Apple engine when its language model is installed. Apple online uses the recognition Siri and Dictation use, which hears names and accents better: your voice is sent to Apple while you speak. With no network it uses Automatic.",
                 comment: "Settings help text under the speech engine picker"
             )
         }
@@ -92,7 +95,7 @@ public enum L10n {
         public static var downloadModelHelp: String {
             String(
                 localized:
-                    "A one-time download managed by macOS. Until it finishes, the classic on-device recognizer is used. Your voice never leaves this Mac either way.",
+                    "A one-time download managed by macOS. Until it finishes, the classic on-device recognizer is used. The on-device engines never send your voice anywhere.",
                 comment: "Settings help text under the model download toggle"
             )
         }
@@ -169,7 +172,7 @@ public enum L10n {
             case .speechRecognition:
                 String(
                     localized:
-                        "Voxa turns your voice into text with Apple's on-device speech recognition. Turn it on in System Settings → Privacy & Security → \(pane).",
+                        "Voxa turns your voice into text with Apple's speech recognition (on this Mac, unless you choose Apple online in Settings). Turn it on in System Settings → Privacy & Security → \(pane).",
                     comment: "Permission detail"
                 )
             case .accessibility:

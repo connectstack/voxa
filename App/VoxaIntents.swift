@@ -17,7 +17,16 @@ struct GiveVoxaACommand: AppIntent {
     /// A command can drive the whole Mac, so this runs only while the Mac is unlocked.
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
-    @Parameter(title: "Command", description: "What Voxa should do", requestValueDialog: "What should Voxa do?")
+    /// Siri asks for this when the phrase didn't carry it, listens, and turns the answer into text: that is the hand-over. It is a
+    /// command, not prose, so what is typed (Type to Siri, or the Shortcuts app) is left as it was written.
+    @Parameter(
+        title: "Command",
+        description: "What Voxa should do",
+        inputOptions: String.IntentInputOptions(
+            capitalizationType: .none, multiline: false, autocorrect: false, smartQuotes: false, smartDashes: false
+        ),
+        requestValueDialog: "What should Voxa do?"
+    )
     var command: String
 
     static var parameterSummary: some ParameterSummary {

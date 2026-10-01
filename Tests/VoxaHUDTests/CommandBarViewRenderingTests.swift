@@ -91,12 +91,60 @@ struct CommandBarViewRenderingTests {
         #expect(image.height == 128)
     }
 
-    @Test("with the microphone on, the bar grows a row for the live level and what listening means")
-    func listeningAddsARow() throws {
+    @Test("a line that says why something didn't happen grows the bar by a row")
+    func noteAddsARow() throws {
         let input = CommandBarModel()
-        input.listening = .listening
+        input.note = L10n.Bar.busyNote
         let image = try render(content(for: .idle, transcript: ""), input: input)
         #expect(image.height > 128)
+    }
+
+    @Test("with the microphone button's click, the bar shows the level and how to send, below its field and microphone")
+    func clickListeningAddsARow() throws {
+        let listening = content(for: .listening, transcript: "")
+        listening.endsOnClick = true
+        let image = try render(listening)
+        #expect(image.height > 128)
+    }
+
+    @Test("the microphone button is for starting while nothing is under way, and for sending while its own click has Voxa listening")
+    func microphoneRole() {
+        let idle = HUDModel()
+        #expect(MicrophoneButton(model: CommandBarModel(), content: idle).role == .start)
+
+        let listening = HUDModel()
+        listening.mode = .listening
+        listening.endsOnClick = true
+        #expect(MicrophoneButton(model: CommandBarModel(), content: listening).role == .send)
+        listening.mode = .preparing
+        let opening = MicrophoneButton(model: CommandBarModel(), content: listening)
+        #expect(opening.role == .send, "a second click while it opens is a change of mind")
+    }
+
+    @Test("a held key's listening, and every step after the click, leave the microphone button alone")
+    func microphoneRoleWhileBusy() {
+        for mode in [HUDMode.listening, .preparing] {
+            // A held key has the microphone: the button is not what ends it.
+            let model = HUDModel()
+            model.mode = mode
+            #expect(MicrophoneButton(model: CommandBarModel(), content: model).role == .unavailable)
+        }
+        for mode in [HUDMode.transcribing, .thinking(partial: nil), .acting(title: "Open Safari")] {
+            let model = HUDModel()
+            model.mode = mode
+            model.endsOnClick = true
+            #expect(MicrophoneButton(model: CommandBarModel(), content: model).role == .unavailable, "\(mode)")
+        }
+    }
+
+    @Test("what is over (a reply, a notice, an error) gives the microphone button back")
+    func microphoneRoleAfterwards() {
+        let problem = UserFacingError(title: "No", detail: "d")
+        for mode in [HUDMode.reply("Done."), .notice(title: "I didn't catch that", detail: nil), .error(problem)] {
+            let model = HUDModel()
+            model.mode = mode
+            #expect(MicrophoneButton(model: CommandBarModel(), content: model).role == .start, "\(mode)")
+        }
     }
 
     @Test("a notice with nothing before it says its title in the row, so with no detail it is one row too")

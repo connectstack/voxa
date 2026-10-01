@@ -13,6 +13,7 @@ public final class FakeHUD: HUDPresenting {
         case hide(after: Duration?)
         case keysEnabled(Bool)
         case answerStatus(AnswerStatus)
+        case endsOnClick(Bool)
     }
 
     public private(set) var events: [Event] = []
@@ -44,6 +45,7 @@ public final class FakeHUD: HUDPresenting {
     public func hide(after delay: Duration?) { events.append(.hide(after: delay)) }
     public func setConfirmationKeysEnabled(_ enabled: Bool) { events.append(.keysEnabled(enabled)) }
     public func setAnswerStatus(_ status: AnswerStatus) { events.append(.answerStatus(status)) }
+    public func setListeningEndsOnClick(_ endsOnClick: Bool) { events.append(.endsOnClick(endsOnClick)) }
 
     /// The state of the keyboard answer the last time it was set.
     public var keysEnabled: Bool {

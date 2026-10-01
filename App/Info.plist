@@ -41,7 +41,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Voxa listens only while you hold the push-to-talk shortcut, and turns what you say into a command. Your voice is transcribed on this Mac.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Voxa uses Apple’s on-device speech recognition to turn your voice into text. Your audio stays on this Mac.</string>
+	<string>Voxa uses Apple’s speech recognition to turn your voice into text. By default this happens on this Mac. If you choose Apple online recognition in Settings, your audio is sent to Apple while you speak, as with Siri and Dictation.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Voxa uses Automation to control other apps when you ask it to, for example opening a document or running a script.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>

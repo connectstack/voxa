@@ -142,15 +142,26 @@ public struct DefaultSpeechRecognizerProvider: SpeechRecognizerProviding {
         case .appleClassic:
             return SFSpeechRecognizerEngine()
         case .appleAutomatic:
-            let classic = SFSpeechRecognizerEngine()
-            guard #available(macOS 26.0, *) else { return classic }
-            return AutomaticSpeechRecognizer(
-                analyzer: SpeechAnalyzerEngine(),
-                classic: classic,
-                probe: SystemSpeechCapabilityProbe(),
-                downloader: downloader,
-                allowsModelDownload: settings.downloadSpeechModel
+            return onDevice(for: settings)
+        case .appleOnline:
+            // Apple's servers, with the best on-device engine behind them for when there is no network.
+            return OnlineSpeechRecognizer(
+                online: SFSpeechRecognizerEngine(recognition: .online),
+                fallback: onDevice(for: settings)
             )
         }
+    }
+
+    /// The best engine that keeps the voice on this Mac.
+    private func onDevice(for settings: AppSettings) -> any SpeechRecognizer {
+        let classic = SFSpeechRecognizerEngine()
+        guard #available(macOS 26.0, *) else { return classic }
+        return AutomaticSpeechRecognizer(
+            analyzer: SpeechAnalyzerEngine(),
+            classic: classic,
+            probe: SystemSpeechCapabilityProbe(),
+            downloader: downloader,
+            allowsModelDownload: settings.downloadSpeechModel
+        )
     }
 }

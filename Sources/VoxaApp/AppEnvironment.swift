@@ -18,11 +18,11 @@ public final class AppEnvironment {
     public let settings: SettingsStore
     public let permissions: SystemPermissionsManager
     public let hotkeys: KeyboardShortcutsHotkeyService
+    /// How Siri is set up (it does the listening: "Hey Siri, ask Voxa"), and the way to its settings.
+    public let siri: any SiriInspecting
     public let settingsWindow: SettingsWindowController
     public let onboardingWindow: OnboardingWindowController
     public let session: VoiceSessionController
-    /// Listens continuously while the microphone button in the Voxa bar is on.
-    public let handsFree: HandsFreeListener
     /// The Voxa bar: a field to type a command in, the microphone button, and everything Voxa shows while it works.
     public let bar: CommandBarController
     public let confirmations: ConfirmationCoordinator
@@ -77,6 +77,7 @@ public final class AppEnvironment {
 
         let connectionTest = ProviderConnectionTest(llm: llm, ollama: ollamaDiscovery, settings: { await settings.current })
         let welcome = WelcomeLauncher()
+        let siri = SystemSiri()
         let services = SettingsServices(
             keys: keyStores,
             testConnection: { await connectionTest.run($0) },
@@ -87,6 +88,7 @@ public final class AppEnvironment {
             tools: Self.toolInfos(tools),
             audit: audit,
             launchAtLogin: SystemLaunchAtLogin(),
+            siri: siri,
             showWelcome: { welcome.show() }
         )
         let settingsWindow = SettingsWindowController(store: settings, services: services)
@@ -96,6 +98,7 @@ public final class AppEnvironment {
         self.settings = settings
         self.permissions = permissions
         self.hotkeys = hotkeys
+        self.siri = siri
         self.settingsWindow = settingsWindow
         self.onboardingWindow = onboardingWindow
         self.confirmations = confirmations
@@ -105,10 +108,12 @@ public final class AppEnvironment {
         self.speaker = speaker
         self.settingsServices = services
         self.frontmost = frontmost
+        // The session opens the microphone for a held key and for the bar's microphone button alike. A development run can play a file
+        // into it instead of a microphone, and script what the recognizer hears.
         let session = VoiceSessionController(
-            capture: MicrophoneCapture(),
-            recognizers: DefaultSpeechRecognizerProvider(),
-            permissions: permissions,
+            capture: Self.makeCapture(overrides),
+            recognizers: Self.makeRecognizers(overrides),
+            permissions: Self.sessionPermissions(overrides, real: permissions),
             hud: bar,
             hotkeys: hotkeys,
             settings: settings,
@@ -118,38 +123,19 @@ public final class AppEnvironment {
             confirmations: confirmations,
             speaker: speaker
         )
-        // Continuous listening has a microphone of its own, so it never shares the one the push-to-talk key uses: it lets go of it
-        // whenever that key, or a command, has need of Voxa.
-        var listening = HandsFreeListener.Configuration()
-        #if DEBUG
-        listening.idleSecondsOverride = overrides.listeningIdleSeconds
-        #endif
-        let handsFree = HandsFreeListener(
-            capture: Self.makeHandsFreeCapture(overrides),
-            recognizers: Self.makeHandsFreeRecognizers(overrides),
-            permissions: Self.handsFreePermissions(overrides, real: permissions),
-            settings: settings,
-            host: session,
-            configuration: listening
-        )
-
-        // The Voxa bar: typing goes to the session, the microphone button to the listener, and the listener's state and loudness come
-        // back to the bar.
-        bar.model.onSubmit = { [weak session] command in session?.submitCommand(command) ?? false }
-        bar.model.onToggleListening = { [weak handsFree] in handsFree?.setOn(!(handsFree?.isOn ?? false)) }
-        bar.model.warning = { [weak settings] in settings?.current.fullControl == true ? L10n.Bar.fullControlWarning : nil }
-        bar.keepsOpen = { [weak handsFree] in handsFree?.isOn ?? false }
-        handsFree.onStateChange = { [weak bar] state in bar?.model.listening = state }
-        handsFree.onLevel = { [weak bar] level in bar?.push(level: level) }
-        handsFree.onStop = { [weak bar] reason in
-            switch reason {
-            case .idle(let minutes): bar?.model.note = L10n.Bar.stoppedIdle(minutes)
-            }
+        // The Voxa bar: typing goes to the session, and so does a click on the microphone button, which is a key press and a key
+        // release made with the mouse. The bar shows what the session does as it does it, and stays where it can be seen while the
+        // button has the microphone open.
+        bar.model.onSubmit = { [weak session] command in
+            Log.session.info("a command was typed in the bar (\(command.count) characters)")
+            return session?.submitCommand(command) ?? false
         }
+        bar.model.onMicrophone = { [weak session] in session?.microphoneClicked() }
+        bar.model.warning = { [weak settings] in settings?.current.fullControl == true ? L10n.Bar.fullControlWarning : nil }
+        bar.keepsOpen = { [weak session] in session?.isMicrophoneOpen ?? false }
         self.session = session
-        self.handsFree = handsFree
         self.bar = bar
-        // Esc, and putting the bar away, stop the microphone too; that needs the finished environment.
+        // Esc, and putting the bar away, let go of the microphone the button opened; that needs the finished environment.
         bar.model.onClose = { [weak self] in self?.closeBar() }
         // A command may type in the app in front, so the bar lets go of the keyboard the moment one starts.
         session.onCommandStarted = { [weak bar] in bar?.releaseKeyboard() }
@@ -163,15 +149,14 @@ public final class AppEnvironment {
         bar.open()
     }
 
-    /// Puts the bar away, and stops listening: a bar that is gone must not leave a microphone open.
+    /// Puts the bar away, and lets go of the microphone its button opened: a bar that is gone must not leave a microphone open.
     public func closeBar() {
-        handsFree.setOn(false)
+        session.cancelMicrophone()
         bar.close()
     }
 
-    /// The shortcut: opens the bar, or closes it if it already has the keyboard. If it is showing without the keyboard because it is
-    /// listening, the shortcut brings the keyboard back to it; while a command is running there is nothing to type into, and the bar
-    /// says so.
+    /// The shortcut: opens the bar, or closes it if it already has the keyboard. While a command is under way there is nothing to type
+    /// into, and the bar says so.
     public func toggleBar() {
         if bar.isVisible && bar.hasKeyboard { closeBar() } else { showBar() }
     }
@@ -180,7 +165,6 @@ public final class AppEnvironment {
     public func start() {
         hotkeys.start()
         session.start()
-        handsFree.start()
         let opens = hotkeys.openBarPresses
         openBarTask = Task { [weak self] in
             for await _ in opens { self?.toggleBar() }
@@ -193,32 +177,32 @@ public final class AppEnvironment {
         #endif
     }
 
-    /// The microphone hands-free listens with. A development run can play a file into it instead.
-    private static func makeHandsFreeCapture(_ overrides: DevelopmentOverrides) -> any AudioCapturing {
+    /// The microphone. A development run can play a file into it instead.
+    private static func makeCapture(_ overrides: DevelopmentOverrides) -> any AudioCapturing {
         #if DEBUG
-        if let url = overrides.handsFreeAudio { return DebugFileMicrophone(url: url) }
+        if let url = overrides.micAudio { return DebugFileMicrophone(url: url) }
         #endif
         return MicrophoneCapture()
     }
 
-    /// Whose answers decide whether hands-free may listen: the real ones, except that a development run playing a file in place of the
+    /// Whose answers decide whether the session may listen: the real ones, except that a development run playing a file in place of the
     /// microphone has no microphone to be allowed to use.
-    private static func handsFreePermissions(
+    private static func sessionPermissions(
         _ overrides: DevelopmentOverrides,
         real: SystemPermissionsManager
     ) -> any PermissionsProviding {
         #if DEBUG
-        if overrides.handsFreeAudio != nil {
+        if overrides.micAudio != nil {
             return ScriptedPermissions([.microphone: .granted, .speechRecognition: .granted], real: real)
         }
         #endif
         return real
     }
 
-    /// The same speech engines a held key uses, all on this Mac. A development run can script what they hear.
-    private static func makeHandsFreeRecognizers(_ overrides: DevelopmentOverrides) -> any SpeechRecognizerProviding {
+    /// The speech engines Apple provides, all on this Mac. A development run can script what they hear.
+    private static func makeRecognizers(_ overrides: DevelopmentOverrides) -> any SpeechRecognizerProviding {
         #if DEBUG
-        if let texts = overrides.handsFreeTranscripts { return DebugScriptedTranscripts(texts) }
+        if let texts = overrides.micTranscripts { return DebugScriptedTranscripts(texts) }
         #endif
         return DefaultSpeechRecognizerProvider()
     }
@@ -302,11 +286,9 @@ struct DevelopmentOverrides {
     var sampleData: SampleData?
 
     enum SampleData { case plain, hostile }
-    /// A file hands-free listening hears in place of the microphone, and what its recognizer says for each utterance.
-    var handsFreeAudio: URL?
-    /// How many seconds of silence switch continuous listening off, in place of the setting (minutes), so a test doesn't wait.
-    var listeningIdleSeconds: TimeInterval?
-    var handsFreeTranscripts: [String]?
+    /// A file the microphone hears in place of the real one, and what its recognizer says for each time someone speaks.
+    var micAudio: URL?
+    var micTranscripts: [String]?
     /// Made-up permission answers for tools (`calendars=denied,reminders=notDetermined`), to see what a refusal looks like.
     var permissionStatuses: [PermissionKind: PermissionStatus] = [:]
 
@@ -320,9 +302,8 @@ struct DevelopmentOverrides {
             auditLogURL: environment["VOXA_DEBUG_AUDIT_PATH"].map { URL(fileURLWithPath: $0) },
             settingsDefaults: environment["VOXA_DEBUG_DEFAULTS_SUITE"].flatMap { UserDefaults(suiteName: $0) },
             sampleData: environment["VOXA_DEBUG_SAMPLE_DATA"].flatMap { $0 == "hostile" ? SampleData.hostile : ($0 == "1" ? .plain : nil) },
-            handsFreeAudio: environment["VOXA_DEBUG_HANDSFREE_AUDIO"].map { URL(fileURLWithPath: $0) },
-            listeningIdleSeconds: environment["VOXA_DEBUG_LISTENING_IDLE_SECONDS"].flatMap(TimeInterval.init),
-            handsFreeTranscripts: environment["VOXA_DEBUG_HANDSFREE_TRANSCRIPTS"].map {
+            micAudio: environment["VOXA_DEBUG_MIC_AUDIO"].map { URL(fileURLWithPath: $0) },
+            micTranscripts: environment["VOXA_DEBUG_MIC_TRANSCRIPTS"].map {
                 $0.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
             },
             permissionStatuses: parseStatuses(environment["VOXA_DEBUG_TOOL_PERMISSIONS"])

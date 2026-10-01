@@ -1,11 +1,15 @@
 import Foundation
 
-/// Which speech-to-text engine turns microphone audio into a transcript. All engines run on this Mac.
+/// Which speech-to-text engine turns microphone audio into a transcript. The first two run on this Mac; the third is the user's
+/// choice to send their voice to Apple, as Siri and Dictation do.
 public enum SpeechEngineKind: String, Codable, CaseIterable, Sendable, Identifiable {
     /// Newest Apple engine (`SpeechAnalyzer`, macOS 26+) when its model is installed, otherwise the classic recognizer.
     case appleAutomatic
     /// `SFSpeechRecognizer`, forced to on-device recognition.
     case appleClassic
+    /// `SFSpeechRecognizer` on Apple's servers: the recognition Siri and Dictation use, which hears names and accents better than
+    /// the on-device models do. The audio is sent to Apple while it is spoken. With no network it is the automatic engine.
+    case appleOnline
 
     public var id: String { rawValue }
 }
@@ -43,10 +47,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// faster starts to blur.
     public static let defaultSpeechRate = 0.5
     public static let speechRateRange: ClosedRange<Double> = 0.3...0.7
-    /// How long continuous listening (the microphone button in the Voxa bar) may go with nothing said before it lets the microphone
-    /// go, in minutes. Zero means it never does.
-    public static let defaultListeningIdleMinutes = 10
-    public static let listeningIdleMinutesRange = 0...240
 
     /// The user's language and region as a plain `language_REGION` identifier (e.g. `en_IN`), without the calendar
     /// and region-override extensions that `Locale.current.identifier` can carry and speech engines reject.
@@ -103,13 +103,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// How fast replies are spoken, in `AVSpeechUtterance`'s units (`speechRateRange`).
     public var speechRate: Double
 
-    // MARK: Listening
-
-    /// Continuous listening is switched on for a while by the person (the microphone button in the Voxa bar), never by a setting:
-    /// it keeps the microphone open and takes what it hears as commands. This is only how long it may go with nothing said before
-    /// it switches itself off, in minutes (zero: never).
-    public var listeningIdleMinutes: Int
-
     // MARK: Safety
 
     public var confirmationStrictness: ConfirmationStrictness
@@ -148,7 +141,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         speakReplies: Bool = true,
         voiceIdentifier: String = "",
         speechRate: Double = AppSettings.defaultSpeechRate,
-        listeningIdleMinutes: Int = AppSettings.defaultListeningIdleMinutes,
         confirmationStrictness: ConfirmationStrictness = .standard,
         fullControl: Bool = false,
         verifyCompletion: Bool = true,
@@ -174,7 +166,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.speakReplies = speakReplies
         self.voiceIdentifier = voiceIdentifier
         self.speechRate = speechRate
-        self.listeningIdleMinutes = listeningIdleMinutes
         self.confirmationStrictness = confirmationStrictness
         self.fullControl = fullControl
         self.verifyCompletion = verifyCompletion
@@ -190,7 +181,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case provider, model, openAIModel, openAIBaseURL, ollamaModel, ollamaBaseURL, ollamaContextLength
         case effort, useRefusalFallback, maxAgentSteps, followUpWindowSeconds
         case speakReplies, voiceIdentifier, speechRate
-        case listeningIdleMinutes
         case confirmationStrictness, fullControl, verifyCompletion, disabledTools, onboardingCompleted
     }
 
@@ -233,11 +223,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         voiceIdentifier = text(.voiceIdentifier, defaults.voiceIdentifier, allowEmpty: true)
         let rate = value(.speechRate, defaults.speechRate)
         speechRate = rate.isFinite ? min(max(rate, Self.speechRateRange.lowerBound), Self.speechRateRange.upperBound) : defaults.speechRate
-
-        listeningIdleMinutes = min(
-            max(value(.listeningIdleMinutes, defaults.listeningIdleMinutes), Self.listeningIdleMinutesRange.lowerBound),
-            Self.listeningIdleMinutesRange.upperBound
-        )
 
         confirmationStrictness = value(.confirmationStrictness, defaults.confirmationStrictness)
         // Anything that isn't a plain true (missing, garbled, from another version) leaves confirmations on.
